@@ -1,0 +1,6 @@
+{
+  "name": "IOS 26 Aherdi",
+  "description": "Complete iOS 26 launcher and operating environment with native apps, Dynamic Island, Control Center, customizable Lock Screen, and Root Power Tools.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,618 @@
+================================================================================
+                    MASTER SYSTEM BLUEPRINT & ARCHITECTURE SPECIFICATION
+                         iLAUNCHER / VIRTUAL iOS 26 OPERATING SYSTEM
+================================================================================
+Dokumen   : Cetak Biru Lengkap (Whole App Master Architecture Blueprint)
+Platform  : Android (API 23 - 35+)
+Bahasa    : 100% Kotlin + Jetpack Compose Declarative UI
+Tipe      : Custom Android Home Launcher & Virtual iOS Sub-OS with Root Capabilities
+Penyusun  : Development & Architecture Engineering Team
+Waktu     : September 2026
+
+================================================================================
+DAFTAR ISI MASTER BLUEPRINT
+================================================================================
+BAB 1: VISI PRODUK & RINGKASAN EKSEKUTIF (PRODUCT VISION)
+BAB 2: ARSITEKTUR SISTEM GLOBAL (SYSTEM TOPOLOGY & CRITICAL LAYERS)
+BAB 3: SUBSISTEM LAYANAN SISTEM ANDROID (SERVICES, RECEIVERS, & IME)
+       3.1. Android Default Home Launcher (MainActivity)
+       3.2. System-wide Overlay Service (IOSOverlayService)
+       3.3. Notification Interception Pipeline (IOSNotificationListenerService)
+       3.4. Virtual iOS Keyboard Service (IOSKeyboardService - IME)
+       3.5. Persistence Boot Receiver (IOSBootReceiver)
+BAB 4: ENGINE INTI, UTILITAS, & HARDWARE BRIDGES
+       4.1. Root Execution Engine (RootExecutor)
+       4.2. Accelerometer Gesture Engine (BackTapDetector)
+       4.3. Persistence & Local Storage Manager (IOSPersistenceManager)
+       4.4. Audio, Haptic & Feedback Suite (IOSFeedbackHelper & FlashlightHelper)
+BAB 5: CENTRAL STATE ORCHESTRATOR (IOSViewModel - 3270+ LINES)
+       5.1. Reactive StateFlow Architecture
+       5.2. Telephony, SMS & Contact Bridges
+       5.3. Real Audio Player & Synthesizer
+       5.4. Connectivity & Power Management
+BAB 6: KATALOG LENGKAP 30+ APLIKASI VIRTUAL & SUB-PAGES
+       6.1. SpringBoard, App Library, & Today View
+       6.2. Safari & Native WebKit Engine
+       6.3. CameraX Studio & Photos Gallery
+       6.4. Phone, FaceTime, & iMessage Messaging Suite
+       6.5. Settings Suite (20+ Modul Sub-Halaman Mendalam)
+       6.6. Produktivitas (Notes, Reminders, Calendar, Clock, Calculator)
+       6.7. Finansial & Gaya Hidup (Wallet, Health, Weather, Stocks, Maps)
+       6.8. Media & Hiburan (Music, Podcasts, TV, Books, App Store)
+       6.9. iRoot Tools Suite (Terminal, Kernel Tweaks, RAM Booster, Spoofing)
+BAB 7: OVERLAY SISTEM & GESTUR INTERAKTIF (15+ KOMPONEN UI)
+       7.1. Lock Screen & iOS 26 Depth Effect Engine
+       7.2. Dynamic Island Multi-Mode Adaptif
+       7.3. Control Center & Notification Center
+       7.4. Home Bar, App Switcher & Gestur Fisika
+       7.5. Siri Apple Intelligence & Spotlight Universal Search
+       7.6. StandBy Mode, AssistiveTouch, & Performance HUD
+BAB 8: PIPELINE END-TO-END DATA & KONTROL (SEKUENS ALUR EKSEKUSI)
+BAB 9: STRUKTUR POHON KODE & PEMETAAN FILE (SOURCE CODE MAP)
+BAB 10: PANDUAN MATERI PRESENTASI & DEMO TEKNIS (PITCH GUIDE)
+
+================================================================================
+BAB 1: VISI PRODUK & RINGKASAN EKSEKUTIF (PRODUCT VISION)
+================================================================================
+Aplikasi ini bukan sekadar launcher tema grafis (skin/icon pack biasa). Ini adalah
+sebuah "Sistem Operasi Virtual Mandiri" (Virtual iOS 26 Operating Sub-Environment) 
+yang berjalan di atas kernel dan framework Android murni.
+
+Tujuan rekayasa dari proyek ini adalah:
+1. Menghadirkan replika sempurna (Pixel-Perfect & Physics-Accurate) dari pengalaman 
+   pengguna Apple iOS 26 / iOS 18 Pro di perangkat Android.
+2. Membuka jembatan fungsional nyata:
+   - SMS nyata (SMSManager), Telepon nyata (Telecom/Intent), Kontak nyata (ContactsContract),
+     Kalender nyata (CalendarContract), dan Alarm nyata.
+   - Kamera fisik nyata (Jetpack CameraX) dan Web Browser nyata (Android WebKit).
+   - Sensor fisik nyata: Akselerometer untuk Back Tap (ketuk bodi belakang HP) dan
+     kamera/LED untuk Senter fisik.
+3. Menghadirkan integrasi OS tingkat dalam:
+   - Berjalan sebagai Android Default Home Launcher (`CATEGORY_HOME`).
+   - Berjalan sebagai System-wide Overlay (`SYSTEM_ALERT_WINDOW`) sehingga Dynamic 
+     Island dan Status Bar iOS tetap melayang saat user membuka aplikasi luar (seperti 
+     WhatsApp, YouTube, Google Chrome).
+   - Memiliki Keyboard iOS virtual bawaan (InputMethodService).
+   - Memiliki Root Engine (`su` shell) untuk mematikan SystemUI Android bawaan, 
+     mengubah DPI layar (Retina resolution), mem-boost CPU governor, dan mengoptimalkan RAM.
+
+================================================================================
+BAB 2: ARSITEKTUR SISTEM GLOBAL (SYSTEM TOPOLOGY & CRITICAL LAYERS)
+================================================================================
+Arsitektur aplikasi mengadopsi pola Reactive Unidirectional Data Flow (UDF) yang 
+dipadukan dengan Clean Architecture dan Multi-Service Android:
+
++-------------------------------------------------------------------------------+
+|                       HARDWARE & ANDROID OS SUBSYSTEMS                        |
+|  [Camera Sensor] [Audio/Mic] [Cellular/SMS] [Wi-Fi/BT] [Sensors] [Linux Kernel]|
++-------------------------------------------------------------------------------+
+                                      |
+                                      v
++-------------------------------------------------------------------------------+
+|                        ANDROID OS INTEGRATION SERVICES                        |
+|  * MainActivity (Default Home Launcher & Root Decor Layout)                   |
+|  * IOSOverlayService (Window Manager Floating Dynamic Island over 3rd party)  |
+|  * IOSNotificationListenerService (Sniffs & Translates incoming Notifications)|
+|  * IOSKeyboardService (InputMethodService - iOS Keyboard IME)                 |
+|  * IOSBootReceiver (DirectBoot & Boot-Completed State Restoration)            |
++-------------------------------------------------------------------------------+
+                                      |
+                                      v
++-------------------------------------------------------------------------------+
+|                        DATA, BRIDGES & EXECUTORS                              |
+|  * RootExecutor (Root Shell su/sh, Process Pipes, System Property Tweaks)     |
+|  * IOSPersistenceManager (Key-Value Engine, JSON Serializer, Android Providers)|
+|  * BackTapDetector (Accelerometer Z-Axis Spike Waveform Analyzer)             |
+|  * OverlayBridge (Cross-Service Coroutine State Channels)                     |
++-------------------------------------------------------------------------------+
+                                      |
+                                      v
++-------------------------------------------------------------------------------+
+|                     CENTRAL ENGINE: IOSViewModel (3270+ L)                    |
+|  * Single Source of Truth (SSOT) via Kotlin StateFlow                         |
+|  * UI States: App Navigation, Dynamic Island, Lock, Brightness, Audio, Telemetry|
+|  * Business Logic for 30+ virtual screens                                     |
++-------------------------------------------------------------------------------+
+                                      |
+                                      v
++-------------------------------------------------------------------------------+
+|                         JETPACK COMPOSE UI LAYER                              |
+|  * SpringBoard & App Library (Desktop & Grid Launcher)                        |
+|  * 18+ Full Core Apps (Safari, Camera, Settings, Music, Phone, Messages, etc) |
+|  * 15+ System Overlays (LockScreen, Control Center, Dynamic Island, Siri, etc)|
++-------------------------------------------------------------------------------+
+
+================================================================================
+BAB 3: SUBSISTEM LAYANAN SISTEM ANDROID (SERVICES, RECEIVERS, & IME)
+================================================================================
+
+3.1. ANDROID DEFAULT HOME LAUNCHER (`MainActivity.kt`)
+- Didaftarkan dengan intent-filter:
+  `android.intent.action.MAIN`
+  `android.intent.category.HOME`
+  `android.intent.category.DEFAULT`
+  `android.intent.category.LAUNCHER`
+- Menjadikan aplikasi ini kandidat sebagai Default Launcher sistem Android.
+- Menangani `enableEdgeToEdge()`, menyembunyikan status bar dan navigation bar 
+  bawaan Android secara permanen via `WindowInsetsControllerCompat`.
+- Menangani siklus hidup (Lifecycle), intent panggilan masuk, SMS broadcast receiver,
+  battery level receiver, network connectivity receiver, dan tombol fisik hardware 
+  (Volume Up/Down memicu Dynamic Island Volume HUD, Back key memicu navigasi iOS).
+
+3.2. SYSTEM-WIDE OVERLAY SERVICE (`IOSOverlayService.kt`)
+- Sebuah Android Foreground Service yang memanfaatkan izin `SYSTEM_ALERT_WINDOW`.
+- Menggunakan `WindowManager.addView()` dengan tipe `TYPE_APPLICATION_OVERLAY` untuk 
+  menempelkan sebuah `ComposeView` di titik paling atas layar fisik (Y = 0).
+- FUNGSI UTAMA: Saat user membuka aplikasi pihak ketiga di luar launcher (misalnya 
+  Instagram, YouTube, Mobile Legends, WhatsApp), Dynamic Island dan Status Bar iOS 
+  TETAP melayang di atas aplikasi tersebut!
+- Terhubung secara reaktif dengan `OverlayBridge.kt` sehingga perubahan state musik, 
+  notifikasi masuk, atau pengisian daya di launcher langsung ter-render di overlay.
+
+3.3. NOTIFICATION INTERCEPTION PIPELINE (`IOSNotificationListenerService.kt`)
+- Service khusus berizin `BIND_NOTIFICATION_LISTENER_SERVICE`.
+- Menangkap setiap notifikasi yang masuk ke ponsel Android (seperti pesan WhatsApp, 
+  email Gmail, notifikasi bank, e-commerce, dll.).
+- Membedah objek `StatusBarNotification`: mengekstrak judul, isi pesan, package name, 
+  ikon aplikasi, dan PendingIntent untuk membuka aplikasi terkait.
+- Memancarkan data via `SharedFlow<AppNotificationData>` ke `IOSViewModel`, yang kemudian 
+  secara otomatis:
+  a) Memunculkan popup ekspansif di Dynamic Island.
+  b) Menyimpan ke tumpukan iOS Notification Center.
+
+3.4. VIRTUAL iOS KEYBOARD SERVICE (`IOSKeyboardService.kt`)
+- Sebuah `InputMethodService` Android nyata yang didaftarkan di sistem.
+- Memberikan keyboard bergaya Apple iOS 26 kepada seluruh sistem operasi Android.
+- Fitur keyboard:
+  * Layout QWERTY dengan tombol abu-abu frosted, shadow drop iOS, dan tombol spasi lebar.
+  * Haptic Feedback presisi dan suara 'clack' mekanik saat mengetik.
+  * Tombol Shift dengan indikator panah kapsital, tombol angka & simbol (?123), 
+    tombol emoji khusus, dan tombol aksi (Enter/Go/Search/Done).
+  * Dapat diaktifkan melalui menu Settings > Language & Input pada perangkat Android.
+
+3.5. PERSISTENCE BOOT RECEIVER (`IOSBootReceiver.kt`)
+- BroadcastReceiver dengan `directBootAware="true"` dan prioritas filter 999 
+  (`BOOT_COMPLETED`, `LOCKED_BOOT_COMPLETED`, `MY_PACKAGE_REPLACED`).
+- Menyelesaikan masalah umum perangkat Android hasil modifikasi (root tweaks):
+  Saat HP direstart, Android SystemUI normalnya akan aktif kembali.
+- `IOSBootReceiver` secara otomatis memeriksa SharedPreferences: jika user sebelumnya 
+  mematikan SystemUI atau mengaktifkan CPU governor / 120Hz via iRoot, receiver ini 
+  langsung mengeksekusi script root su di background begitu HP menyala sehingga 
+  tampilan iOS tetap utuh tanpa terputus!
+
+================================================================================
+BAB 4: ENGINE INTI, UTILITAS, & HARDWARE BRIDGES
+================================================================================
+
+4.1. ROOT EXECUTION ENGINE (`RootExecutor.kt`)
+- Engine eksekusi shell tingkat rendah (Low-Level Process Pipe).
+- Mengecek ketersediaan `su` binary (`/system/bin/su`, `/system/xbin/su`, Magisk, KernelSU) 
+  dan fallback ke `sh`.
+- Kemampuan khusus:
+  * `killAndroidBars()`: Mematikan bar navigasi dan status bar bawaan via policy control.
+  * `disableSystemUICompletely()`: Mematikan paket `com.android.systemui` secara permanen, 
+    memblokir pull-down shade via `service call statusbar 1 i32 65536`, dan menulis 
+    skrip boot Magisk di `/data/adb/service.d/iroot_init.sh`.
+  * `boostCpuGovernor()`: Menyetel governor semua inti CPU ke mode `performance`.
+  * `optimizeJ2PrimeRam()`: Menghapus drop_caches (`echo 3 > /proc/sys/vm/drop_caches`) 
+    dan mengompresi memori ZRAM untuk perangkat ber-RAM kecil (seperti 1.5GB).
+  * `setIosRetinaDpi(dpi)`: Mengubah resolusi visual via `wm density`.
+  * `spoofIphoneModel()`: Memodifikasi properti build (`ro.product.model`, `ro.product.brand`) 
+    menjadi "iPhone 16 Pro Max" atau "iPhone SE".
+
+4.2. ACCELEROMETER GESTURE ENGINE (`BackTapDetector.kt`)
+- Menggunakan `SensorManager` Android membaca `Sensor.TYPE_ACCELEROMETER`.
+- Melacak lonjakan akselerasi pada sumbu Z (Z-axis spike) saat bagian belakang casing HP diketuk.
+- Menggunakan algoritma jendela waktu (time-window 250ms - 400ms) dan threshold percepatan 
+  untuk membedakan antara guncangan langkah kaki berjalan vs ketukan jari pengguna.
+- Mendukung dua gesture:
+  * Double Tap (Ketuk 2x): Contoh pemicu Senter, Screenshot, atau Mute.
+  * Triple Tap (Ketuk 3x): Contoh pemicu Control Center atau Lock Screen.
+
+4.3. PERSISTENCE & LOCAL STORAGE MANAGER (`IOSPersistenceManager.kt`)
+- Pengelola penyimpanan lokal terpadu (Unified Storage Engine).
+- Mengintegrasikan SharedPreferences, file internal privat, dan ContentResolver Android.
+- Menyimpan:
+  * Alarms (sinkronisasi dengan `AlarmClock.ACTION_SET_ALARM`).
+  * Calendar Events (sinkronisasi dengan `CalendarContract.Events`).
+  * To-Do Reminders dengan kategori dan warna bendera.
+  * Notes lengkap dengan judul, isi teks, dan timestamp.
+  * Wallpaper pilihan pengguna, konfigurasi Depth Effect (Mountain, Planet, Dune, Skyline), 
+    font jam, warna jam, dan widget Lock Screen.
+  * Custom App Icons (file gambar yang dipetakan ke aplikasi tertentu).
+  * Preferensi Action Button, Camera Control, Focus Mode, dan Back Tap.
+
+4.4. AUDIO, HAPTIC & FEEDBACK SUITE
+- `IOSFeedbackHelper.kt`: Menghasilkan getaran haptik presisi mikro (Light, Medium, 
+  Heavy, Success, Warning, Error) menggunakan `VibrationEffect` modern.
+- `FlashlightHelper.kt`: Mengendalikan LED flash fisik kamera secara langsung via 
+  `CameraManager.setTorchMode()`.
+
+================================================================================
+BAB 5: CENTRAL STATE ORCHESTRATOR (IOSViewModel - 3270+ LINES)
+================================================================================
+`IOSViewModel.kt` adalah otak pusat pengendali seluruh ekosistem aplikasi. Menggunakan 
+pola `AndroidViewModel` dengan puluhan `StateFlow` dan `MutableStateFlow` yang menjamin 
+sifat reaktif dan thread-safe.
+
+5.1. STATE MANAGEMENT SUBSYSTEMS
+- Layar & Navigasi:
+  `activeApp`: Menyimpan aplikasi yang sedang terbuka (null = SpringBoard/Home).
+  `recentApps`: Daftar kartu aplikasi multitasking di App Switcher.
+  `isControlCenterOpen`, `isNotificationCenterOpen`, `isSpotlightOpen`, `isSiriOpen`,
+  `isStandByOpen`, `isShareSheetOpen`, `isAppSwitcherOpen`.
+- Keamanan & Lock Screen:
+  `isDeviceLocked`: Menentukan apakah layar dalam status terkunci.
+  `userPasscode`: Kode PIN 4 atau 6 digit.
+  `isFaceIdEnabled`: Menentukan apakah sensor biometrik/wajah aktif.
+  `lockScreenConfig`: Pengaturan visual Depth Effect, Font jam, dan Widget.
+- Hardware & Telemetri Real-time:
+  `batteryLevel`, `isBatteryCharging`, `isWifiConnected`, `cellularBars`, `networkType`,
+  `volume`, `brightness`, `flashlightEnabled`, `isAirplaneMode`.
+
+5.2. TELEPHONY, SMS & CONTACTS PIPELINE
+- `loadDeviceContacts()`: Mengambil daftar kontak nyata dari `ContactsContract`.
+- `addNewContact()`: Menulis kontak baru langsung ke database kontak Android.
+- `makeRealPhoneCall()`: Memulai panggilan suara melalui Android Telecom subsystem.
+- `loadDeviceSms()`: Membaca inbox pesan SMS dari `Telephony.Sms.CONTENT_URI`.
+- `sendRealSms()`: Mengirim SMS nyata via `SmsManager.getDefault().sendTextMessage()`.
+- `onIncomingCallReceived()` & `answerIncomingCall()`: Menampilkan banner panggilan 
+  masuk di Dynamic Island dengan opsi jawab atau tolak.
+
+5.3. AUDIO PLAYER & LIVE SYNTHESIZER
+- `loadLocalMusic()`: Memindai file `.mp3` dan `.m4a` dari penyimpanan perangkat via MediaStore.
+- `playSong()`: Memutar audio menggunakan instance `MediaPlayer`.
+- `startAudioSynthesizer()`: Jika tidak ada file musik di HP, sistem menyediakan 
+  synthesizer gelombang audio bawaan sehingga pemutar musik dan visualizer Dynamic 
+  Island tetap berfungsi dan bersuara merdu secara nyata!
+- Terkoneksi ke Dynamic Island (menampilkan waveform animasi, album art, dan timer lagu).
+
+5.4. KONEKTIVITAS & PUSAT KENDALI
+- Wi-Fi Manager: Scan jaringan sekitar (`scanWifiNetworks`), menyambungkan ke SSID 
+  dengan password (`connectToWifi`), toggle status on/off.
+- Bluetooth Manager: Menyalakan/mematikan Bluetooth, scanning perangkat sekitar, dan pairing.
+- Hotspot & Cellular Data toggle via shell/system API.
+
+================================================================================
+BAB 6: KATALOG LENGKAP 30+ APLIKASI VIRTUAL & SUB-PAGES
+================================================================================
+
+6.1. SPRINGBOARD, APP LIBRARY, & TODAY VIEW
+- `SpringBoardScreen.kt`:
+  Halaman utama dengan grid aplikasi, titik indikator halaman, Dock bawah 4 aplikasi, 
+  dan Widget Stacks (Jam Analog, Kalender, Galeri Foto, Cuaca, Baterai, Catatan).
+  Mendukung Jiggle Mode (edit susunan ikon dan hapus aplikasi).
+- `AppLibraryScreen.kt`:
+  Pustaka aplikasi terorganisir otomatis ke dalam folder: Utilities, Productivity, 
+  Entertainment, Social, Creativity, Games, and Developer Tools.
+- `TodayViewScreen.kt`:
+  Layar widget di sisi paling kiri dengan ringkasan cuaca, aktivitas kebugaran, 
+  jadwal kalender, dan berita terkini.
+
+6.2. SAFARI & NATIVE WEBKIT ENGINE (`SafariApp.kt` & `IOSWebEngineView.kt`)
+- Browser web fungsional penuh berbasis Android WebView dengan akselerasi perangkat keras.
+- Bilah alamat URL mengambang di bawah khas iOS Safari modern.
+- Fitur: Tab Manager, Bookmark, History, Mode Pribadi (Incognito), Reader Mode, 
+  indikator loading bar halus, dan navigasi Back/Forward/Reload.
+
+6.3. CAMERAX STUDIO & PHOTOS GALLERY (`CameraApp.kt` & `PhotosApp.kt`)
+- `CameraApp.kt`: Menggunakan Android Jetpack CameraX.
+  * Preview kamera instan dengan rasio aspek dinamis.
+  * Tombol Shutter dengan efek animasi rana dan getaran haptik.
+  * Pengalih kamera depan/belakang, pengatur flash LED fisik, slider zoom digital.
+  * Thumbnail foto terakhir di pojok kiri bawah yang dapat diketuk untuk membuka Photos.
+- `PhotosApp.kt`:
+  * Menampilkan seluruh foto yang ada di memori internal perangkat.
+  * Penampil foto layar penuh (Lightbox) dengan fungsi pinch-to-zoom.
+  * Tombol cepat untuk langsung menjadikan foto sebagai Wallpaper perangkat.
+
+6.4. SUITE KOMUNIKASI: PHONE, FACETIME, & MESSAGES
+- `PhoneApp.kt`: Keypad dialer dengan bunyi nada DTMF asli, tab Panggilan Terakhir, 
+  tab Kontak dengan pencarian cerdas, dan tab Favorit.
+- `MessagesApp.kt`: Percakapan SMS/iMessage nyata dengan balon obrolan warna biru/hijau, 
+  timestamp pesan, pengirim SMS dinamis, dan dialog pesan baru.
+- `FaceTimeApp.kt`: Menampilkan preview kamera selfie langsung secara real-time, 
+  memberikan sensasi panggilan video tatap muka.
+
+6.5. SETTINGS SUITE (20+ MODUL SUB-HALAMAN MENDALAM)
+- Mengemulasi aplikasi Settings iOS paling komprehensif yang pernah dibuat:
+  1. Wi-Fi: Scan jaringan nyata, sinyal bar, input password dialog, informasi IP.
+  2. Bluetooth: Perangkat terhubung, perangkat sekitar, sakelar power.
+  3. Cellular: Pengaturan data seluler, roaming, statistik penggunaan kuota.
+  4. Hotspot Pribadi: Nama hotspot, password, daftar koneksi.
+  5. Pemberitahuan (Notifications): Gaya pratinjau, aktivasi Notification Listener.
+  6. Suara & Haptik: Slider volume dering, tombol hening, suara keyboard, haptic click.
+  7. Fokus (Focus/DND): Mode Jangan Ganggu, Bekerja, Tidur, Pribadi.
+  8. Waktu Layar (Screen Time): Grafik visualisasi durasi pemakaian perangkat.
+  9. Umum (General): Tentang Perangkat (About iPhone), Pembaruan Perangkat Lunak, AirDrop.
+  10. Tampilan & Kecerahan: Mode Gelap/Terang, True Tone, Night Shift, Ukuran Teks.
+  11. Layar Kunci & Wallpaper: Pengaturan Depth Effect, Galeri Wallpaper, Kustomizer Jam.
+  12. StandBy: Pengaturan mode jam meja saat charging (Night mode, Always-On).
+  13. Face ID & Kode Masuk (Passcode): Ganti PIN 4/6 digit, aktivasi biometrik.
+  14. Baterai & Kesehatan Baterai (`BatteryHealthSubPage.kt`): Persentase baterai, 
+      Kapasitas Maksimum (misal 98%), Pengisian Daya Optimal.
+  15. Tombol Tindakan (Action Button): Pemetaan fungsi tombol fisik (Senter, Kamera, Mute).
+  16. Kontrol Kamera (Camera Control): Penyesuaian sensitivitas sentuhan tombol kamera samping.
+  17. Aksesibilitas & Ketuk Belakang (`BackTapSubPage.kt`): Konfigurasi Double/Triple Tap.
+  18. Menu Pengembang (`DeveloperSubPage.kt`): HUD FPS Counter, Skala Animasi.
+  19. Privasi & Keamanan: Izin lokasi, kamera, mikrofon, kontak.
+  20. Reset & Hapus Data: Opsi reset pengaturan launcher ke default pabrik.
+
+6.6. PRODUKTIVITAS: NOTES, REMINDERS, CALENDAR, CLOCK, CALCULATOR
+- `NotesApp.kt`: Manajemen catatan teks kaya, folder catatan, pencarian, dan simpan permanen.
+- `RemindersApp.kt`: Daftar to-do list interaktif dengan kotak centang, pengelompokan 
+  Hari Ini, Terjadwal, Berbendera, dan Selesai.
+- `CalendarApp.kt`: Penampil kalender bulanan dan agenda harian dengan event sinkron.
+- `ClockApp.kt`: Jam Dunia (World Clock), Alarm multi-jadwal, Stopwatch dengan lap table, 
+  dan Timer hitung mundur yang terhubung ke Dynamic Island.
+- `CalculatorApp.kt`: Kalkulator ilmiah/standar berdesain Apple oranye-abu-abu, operasi 
+  aritmatika instan, dan gesture geser untuk hapus angka.
+
+6.7. FINANSIAL & GAYA HIDUP: WALLET, HEALTH, WEATHER, STOCKS, MAPS
+- `WalletApp.kt`: Tampilan Apple Pay dengan kartu Apple Card titanium 3D, kartu debit/kredit, 
+  simulasi tap NFC pembayaran, dan buku besar transaksi.
+- `HealthApp.kt`: Cincin aktivitas Move, Exercise, dan Stand; grafik langkah kaki; kalori; 
+  dan durasi tidur.
+- `WeatherApp.kt`: Prakiraan cuaca bertenaga live Open-Meteo API, suhu per jam, kondisi angin, 
+  kelembapan, UV index, dan efek latar belakang partikel hujan/cerah.
+- `StocksApp.kt`: Portofolio saham interaktif (AAPL, TSLA, NVDA, GOOGL) dengan grafik candle/line.
+- `MapsApp.kt`: Peta navigasi visual dengan pencarian tempat penting dan rute petunjuk arah.
+
+6.8. MEDIA & HIBURAN: MUSIC, PODCASTS, TV, BOOKS, APP STORE
+- `MusicApp.kt`: Pemutar musik lengkap dengan scrubber seek bar, lirik sinkron, tombol 
+  shuffle/repeat, dan album cover art.
+- `PodcastsApp.kt`: Katalog acara podcast terkurasi dengan episode player.
+- `TVApp.kt`: Showcase film dan trailer Apple TV+ dengan desain poster sinematik.
+- `BooksApp.kt`: Rak buku digital dengan target membaca harian dan penampil teks buku.
+- `AppStoreApp.kt`: Etalase toko aplikasi iOS dengan tab Today, Games, Apps, dan 
+  jembatan peluncur aplikasi Android yang terpasang di HP.
+
+6.9. iROOT TOOLS SUITE (`RootToolsApp.kt`)
+- Modul utilitas khusus untuk pengguna tingkat mahir (Power User) dan perangkat spesifikasi hemat:
+  * Detektor Status Root: Mengecek Magisk, KernelSU, status SELinux (Enforcing/Permissive).
+  * Monitor Perangkat Keras: Menampilkan frekuensi CPU real-time, penggunaan RAM, dan suhu baterai.
+  * Optimizer Samsung Galaxy J2 Prime: Pembersih cache RAM seketika (`drop_caches`) dan pemadat ZRAM.
+  * Pembunuh SystemUI Android: Mematikan status bar dan bar navigasi bawaan perangkat secara permanen, 
+    dilengkapi skrip boot otomatis di `/data/adb/service.d/iroot_init.sh`.
+  * Skala Retina DPI: Mengubah kerapatan piksel layar menjadi 320 DPI agar visual setajam layar iPhone Retina.
+  * Model Spoofer: Menyamarkan identitas build prop Android menjadi "iPhone 16 Pro Max".
+  * Terminal Root Virtual: Antarmuka command-line interaktif untuk mengetik perintah shell linux murni.
+
+================================================================================
+BAB 7: OVERLAY SISTEM & GESTUR INTERAKTIF (15+ KOMPONEN UI)
+================================================================================
+
+7.1. LOCK SCREEN & iOS 26 DEPTH EFFECT ENGINE (`IOSLockScreenView.kt` & `IOSDepthWallpaperRenderer.kt`)
+- Jam Raksasa dengan Efek Kedalaman (Depth Effect):
+  Angka jam digambar di antara lapisan background pemandangan dan lapisan subjek foreground 
+  (puncak gunung es Alpen, horizon planet kosmik, bukit pasir, atau siluet gedung kota).
+- Kustomizer Layar Kunci:
+  Tekan lama (long press) pada Lock Screen untuk membuka panel pengubah font jam (SF Pro, 
+  Rounded, Serif, Mono, Bold), palet warna jam, dan widget mini.
+- Keypad Passcode Ergonomis:
+  Tombol bulat diameter 80dp bergaya frosted glass di zona bawah layar yang ramah jempol. 
+  Dilengkapi getaran haptik, suara klik iOS, dan animasi pegas goyang (shake) saat salah PIN.
+- Face ID Biometric Simulator:
+  Animasi ikon gembok berputar yang membuka otomatis saat wajah terdeteksi.
+
+7.2. DYNAMIC ISLAND MULTI-MODE ADAPTIF (`DynamicIsland.kt`)
+- Pil hitam interaktif di bagian atas layar kamera yang memiliki 4 mode ukuran:
+  1. Mini Capsule: Mode siaga standar yang menyatu dengan kamera depan.
+  2. Compact State: Menampilkan ikon kecil di kiri dan teks/waveform di kanan (misal ikon musik).
+  3. Expanded State: Membesar saat disentuh, memunculkan kontrol pemutar musik penuh, 
+     countdown timer besar dengan tombol stop, atau banner panggilan telepon masuk.
+  4. Notification Alert: Melebar secara dinamis saat ada pesan WhatsApp atau notifikasi masuk.
+- Dilengkapi animasi pegas fluida (Spring Animation) standar iOS.
+
+7.3. CONTROL CENTER & NOTIFICATION CENTER
+- `IOSControlCenter.kt`: Ditarik dari pojok kanan atas layar.
+  * Slider kecerahan dan volume vertikal dengan persentase real-time.
+  * Pod 4 toggle konektivitas (Airplane, Seluler, Wi-Fi, Bluetooth).
+  * Toggle Senter fisik, Kalkulator, Rotasi Layar, Timer, dan Mode Fokus/DND.
+- `IOSNotificationCenter.kt`: Ditarik dari pojok kiri atas/tengah layar.
+  * Daftar notifikasi bertumpuk (stacked cards) dari sistem Android.
+  * Tombol bersihkan semua notifikasi dan jam digital Lock Screen sekunder.
+
+7.4. HOME BAR, APP SWITCHER & GESTUR FISIKA
+- `HomeBar.kt`:
+  Bilah horizontal melayang di dasar layar yang mendeteksi gestur geser pengguna:
+  * Swipe Up Cepat: Menutup aplikasi saat ini dan kembali ke SpringBoard dengan animasi mengecil.
+  * Swipe Up & Hold: Membuka iOS App Switcher (`IOSAppSwitcher.kt`).
+- `IOSAppSwitcher.kt`:
+  Tampilan multitasking carousel dengan kartu-kartu aplikasi 3D.
+  Geser kartu ke atas (flick up) untuk mematikan proses aplikasi dari memori.
+
+7.5. SIRI APPLE INTELLIGENCE & SPOTLIGHT SEARCH
+- `SiriOverlay.kt`:
+  Pendaran cahaya neon multi-warna mengelilingi seluruh tepi layar ponsel (Apple Intelligence glow), 
+  disertai visualizer gelombang suara dan saran aksi cepat.
+- `SpotlightSearchOverlay.kt`:
+  Tarik ke bawah dari tengah SpringBoard untuk memunculkan pencarian universal: mencari aplikasi 
+  internal, aplikasi Android luar, nomor kontak, perhitungan matematika cepat, dan web query.
+
+7.6. STANDBY MODE, ASSISTIVETOUCH, & PERFORMANCE HUD
+- `IOSStandByOverlay.kt`:
+  Aktif otomatis saat perangkat dicolokkan ke pengisi daya listrik dalam orientasi lanskap. 
+  Menampilkan jam meja format besar, kalender, dan Night Mode merah temaram.
+- `AssistiveTouchView.kt`:
+  Tombol pintas bundar melayang di layar yang dapat dipindah-pindah, membuka menu jalan pintas 
+  Home, Control Center, Siri, Kunci Layar, dan Volume.
+- `IOSFpsOverlay.kt`:
+  Indikator performa frame-rate (FPS) real-time berbasis `Choreographer` untuk memantau 
+  kehalusan animasi antarmuka 60-120Hz.
+
+================================================================================
+BAB 8: PIPELINE END-TO-END DATA & KONTROL (SEKUENS ALUR EKSEKUSI)
+================================================================================
+
+PIPELINE 1: ALUR NOTIFIKASI PIHAK KETIGA KE DYNAMIC ISLAND & NOTIF CENTER
+--------------------------------------------------------------------------------
+1. Pesan WhatsApp / SMS / Notifikasi masuk ke perangkat Android.
+2. Android OS memicu `IOSNotificationListenerService.onNotificationPosted()`.
+3. Service mengekstrak `packageName`, `title`, `text`, dan `PendingIntent`.
+4. Data dipancarkan ke `IOSNotificationListenerService.notificationFlow`.
+5. `MainActivity` dan `IOSOverlayService` menangkap flow tersebut.
+6. `IOSViewModel.addNotification()` menyimpan item ke tumpukan Notification Center.
+7. `IOSViewModel.showDynamicIslandNotification()` memicu animasi mengembang pada 
+   Dynamic Island di layar.
+8. Pengguna mengetuk Dynamic Island -> `PendingIntent.send()` dieksekusi -> Aplikasi 
+   WhatsApp asli langsung terbuka!
+
+PIPELINE 2: ALUR DEPTH EFFECT RENDERING PADA LOCK SCREEN
+--------------------------------------------------------------------------------
+1. Pengguna memilih wallpaper bertema Depth Effect (misal Alpine Mountain Peak).
+2. `IOSDepthWallpaperRenderer` menerima `LockScreenConfig` dan membagi kanvas menjadi 3 lapisan:
+   - LAPISAN 1 (Background): Merender langit bergradasi senja/fajar, kabut gunung, atau bintang kosmik.
+   - LAPISAN 2 (Jam Raksasa): Merender teks waktu "09:41" dengan font dan warna pilihan 
+     pada koordinat vertikal tepat di bawah puncak gunung.
+   - LAPISAN 3 (Foreground Subject): Merender siluet puncak gunung bersalju dengan kontur 
+     presisi di atas angka jam, sehingga bagian bawah jam tertutup secara alami.
+3. Hasil: Menghasilkan efek 3D spasial di mana jam tampak nyata berdiri di belakang gunung.
+
+PIPELINE 3: ALUR GESTUR BACK TAP (KETUK BELAKANG CASING HP)
+--------------------------------------------------------------------------------
+1. `BackTapDetector` memantau sinyal `Sensor.TYPE_ACCELEROMETER`.
+2. Pengguna mengetuk bodi belakang ponsel dua kali dengan jari.
+3. Gelombang getaran Z-axis menghasilkan dua lonjakan percepatan tajam dalam selang waktu 
+   250ms - 400ms.
+4. Algoritma filter memastikan lonjakan bukan berasal dari langkah kaki atau guncangan mobil.
+5. Callback `onDoubleTap()` dipanggil -> `IOSViewModel.triggerBackTapAction()`.
+6. Aksi dijalankan seketika (misal menyalakan Senter LED via `CameraManager` atau menangkap layar).
+7. Notifikasi ringkas muncul di Dynamic Island ("Back Tap: Senter Menyala").
+
+PIPELINE 4: ALUR EKSEKUSI ROOT TWEAKS & PERSISTENSI REBOOT
+--------------------------------------------------------------------------------
+1. Pengguna membuka aplikasi `Root Tools` -> Menekan tombol "Matikan SystemUI Android".
+2. `RootToolsApp` memanggil `IOSViewModel.disableSystemUICompletelyRoot()`.
+3. `RootExecutor` menjalankan perintah su:
+   - `settings put global policy_control immersive.navigation=*`
+   - `service call statusbar 1 i32 65536` (memblokir tarikan status bar Android).
+   - `pm disable-user --user 0 com.android.systemui` (mematikan paket SystemUI).
+4. `RootExecutor` menulis skrip shell ke `/data/adb/service.d/iroot_init.sh`.
+5. Status disimpan ke `IOSPersistenceManager.saveRootBoolean("systemui_disabled", true)`.
+6. Saat pengguna me-reboot HP -> `IOSBootReceiver` menerima sinyal `BOOT_COMPLETED` 
+   dan mengeksekusi ulang script pematian SystemUI secara instan sebelum layar menyala!
+
+================================================================================
+BAB 9: STRUKTUR POHON KODE & PEMETAAN FILE (SOURCE CODE MAP)
+================================================================================
+app/src/main/
+├── AndroidManifest.xml (Konfigurasi Service, Receiver, Permission, Home Launcher)
+├── java/com/example/
+│   ├── MainActivity.kt (Aktivitas Utama, Lifecyle, Broadcast Receiver, Root Composable)
+│   ├── data/
+│   │   └── IOSPersistenceManager.kt (Penyimpanan Key-Value, JSON, Calendar/Alarm bridge)
+│   ├── model/
+│   │   ├── AppItem.kt (Definisi AppId enum, ikon dan label aplikasi)
+│   │   ├── Models.kt (Model Notifikasi, Kontak, SMS, Catatan, Reminder, Focus, BackTap)
+│   │   └── WeatherData.kt (Model Data Prakiraan Cuaca)
+│   ├── receiver/
+│   │   └── IOSBootReceiver.kt (Receiver startup ponsel untuk persistensi root)
+│   ├── service/
+│   │   ├── IOSKeyboardService.kt (InputMethodService IME Keyboard virtual iOS)
+│   │   ├── IOSNotificationListenerService.kt (Pencegat notifikasi WhatsApp/Android)
+│   │   ├── IOSOverlayService.kt (Foreground Service overlay Dynamic Island sistemik)
+│   │   └── OverlayBridge.kt (Jembatan komunikasi antar-service)
+│   ├── ui/
+│   │   ├── components/ (15+ Komponen Sistem Overlays)
+│   │   │   ├── AssistiveTouchView.kt (Tombol home mengambang)
+│   │   │   ├── DynamicIsland.kt (Notch pintar adaptif)
+│   │   │   ├── HomeBar.kt (Bilah gesture bawah layar)
+│   │   │   ├── IOSAppSwitcher.kt (Multitasking carousel)
+│   │   │   ├── IOSControlCenter.kt (Pusat kendali toggle & slider)
+│   │   │   ├── IOSDepthWallpaperRenderer.kt (Engine jam di balik gunung 3D)
+│   │   │   ├── IOSFpsOverlay.kt (HUD monitor frame-rate 120 FPS)
+│   │   │   ├── IOSLockScreenView.kt (Layar kunci dengan keypad passcode 80dp)
+│   │   │   ├── IOSNotificationCenter.kt (Pusat pemberitahuan)
+│   │   │   ├── IOSShareSheet.kt (Menu berbagi AirDrop)
+│   │   │   ├── IOSStandByOverlay.kt (Jam meja lanskap saat dicas)
+│   │   │   ├── IOSStatusBar.kt (Bilah status sinyal, baterai, wifi)
+│   │   │   ├── IOSWebEngineView.kt (Engine WebKit WebView)
+│   │   │   ├── SiriOverlay.kt (Apple Intelligence glow screen)
+│   │   │   └── SpotlightSearchOverlay.kt (Pencarian global)
+│   │   ├── screens/ (30+ Aplikasi & Sub-Halaman)
+│   │   │   ├── AppLibraryScreen.kt (Kategori folder aplikasi)
+│   │   │   ├── AppStoreApp.kt (Toko aplikasi iOS)
+│   │   │   ├── BackTapSubPage.kt (Halaman konfigurasi ketuk belakang)
+│   │   │   ├── BatteryHealthSubPage.kt (Halaman kesehatan baterai)
+│   │   │   ├── BooksApp.kt (Aplikasi buku digital)
+│   │   │   ├── CalculatorApp.kt (Kalkulator iOS)
+│   │   │   ├── CalendarApp.kt (Kalender acara)
+│   │   │   ├── CameraApp.kt (Kamera CameraX)
+│   │   │   ├── ClockApp.kt (Jam, Alarm, Stopwatch, Timer)
+│   │   │   ├── DeveloperSubPage.kt (Pengaturan pengembang & FPS)
+│   │   │   ├── FaceTimeApp.kt (Video call preview)
+│   │   │   ├── FocusSubPage.kt (Pengaturan Mode Fokus)
+│   │   │   ├── HealthApp.kt (Apple Health Cincin Aktivitas)
+│   │   │   ├── MailApp.kt (Aplikasi Email)
+│   │   │   ├── MapsApp.kt (Peta & Navigasi)
+│   │   │   ├── MessagesApp.kt (SMS & iMessage nyata)
+│   │   │   ├── MusicApp.kt (Pemutar musik & synthesizer)
+│   │   │   ├── NotesApp.kt (Catatan tersimpan)
+│   │   │   ├── PhoneApp.kt (Dialer telepon & kontak)
+│   │   │   ├── PhotosApp.kt (Galeri foto)
+│   │   │   ├── PodcastsApp.kt (Pemutar podcast)
+│   │   │   ├── RemindersApp.kt (Pengingat to-do list)
+│   │   │   ├── RootToolsApp.kt (iRoot Suite & terminal)
+│   │   │   ├── SafariApp.kt (Browser Safari web nyata)
+│   │   │   ├── SettingsApp.kt (Pusat pengaturan utama)
+│   │   │   ├── SettingsSubScreens.kt (20+ sub-halaman pengaturan mendalam)
+│   │   │   ├── SpringBoardScreen.kt (Home desktop & widget stacks)
+│   │   │   ├── StocksApp.kt (Pasar saham finansial)
+│   │   │   ├── TodayViewScreen.kt (Layar widget kiri)
+│   │   │   ├── TVApp.kt (Katalog Apple TV+)
+│   │   │   ├── WalletApp.kt (Apple Pay & kartu kredit)
+│   │   │   └── WeatherApp.kt (Prakiraan cuaca live)
+│   │   └── theme/
+│   │       ├── Color.kt (Palet warna iOS asli)
+│   │       ├── Theme.kt (Tema Material 3 adaptif ke iOS HIG)
+│   │       └── Type.kt (Tipografi San Francisco Pro)
+│   ├── util/
+│   │   ├── BackTapDetector.kt (Sensor akselerometer ketukan casing)
+│   │   ├── FlashlightHelper.kt (Pengontrol LED flash hardware)
+│   │   ├── IOSFeedbackHelper.kt (Penggetar haptik mikro)
+│   │   ├── IOSTintedBackgroundManager.kt (Manajer efek kaca buram)
+│   │   └── RootExecutor.kt (Engine eksekusi shell su/sh)
+│   └── viewmodel/
+│       └── IOSViewModel.kt (Otak orkestrasi reaktif 3270+ baris)
+└── res/ (Resource gambar wallpaper resolusi tinggi, audio, xml)
+
+================================================================================
+BAB 10: PANDUAN MATERI PRESENTASI & DEMO TEKNIS (PITCH GUIDE)
+================================================================================
+Saat mendemokan atau mempresentasikan aplikasi ini, ikuti skenario 5 menit ini:
+
+1. MENIT 1: INTRODUKSI & LOCK SCREEN DEPTH EFFECT
+   - Tunjukkan Lock Screen yang memukau: angka jam raksasa berada di balik puncak gunung Alpen.
+   - Buka kustomisasi layar kunci (long-press): ganti font jam dan matikan/hidupkan Depth Effect.
+   - Masukkan Passcode pada tombol keypad 80dp yang ergonomis: tunjukkan animasi goyang (shake) 
+     jika salah, dan getaran haptik halus saat PIN benar.
+
+2. MENIT 2: SPRINGBOARD, DYNAMIC ISLAND & GESTUR
+   - Tunjukkan kehalusan transisi SpringBoard, tumpukan widget cuaca/jam/kalender, dan Jiggle Mode.
+   - Putar lagu di Music App: tunjukkan Dynamic Island di atas layar mengembang menampilkan 
+     live waveform audio.
+   - Tekan tombol Home Bar dengan geser ke atas: aplikasi menutup dengan animasi scaling yang mulus.
+   - Geser dan tahan Home Bar: tunjukkan App Switcher multitasking 3D.
+
+3. MENIT 3: INTEGRASI HARDWARE NYATA (KAMERA, SAFARI, PHONE, SMS)
+   - Buka Safari: ketik alamat website (misal google.com) untuk membuktikan web browser berjalan nyata.
+   - Buka Camera: tunjukkan kamera belakang/depan bertenaga CameraX dan ambil gambar.
+   - Buka Phone: tekan dialer dengan nada DTMF dan tunjukkan daftar kontak asli perangkat.
+
+4. MENIT 4: FITUR UNIK TINGKAT TINGGI (BACK TAP & SYSTEM-WIDE OVERLAY)
+   - Buka Settings > Accessibility > Back Tap.
+   - Ketuk dua kali bagian belakang bodi HP: senter fisik menyala seketika dan Dynamic Island 
+     memberi feedback.
+   - Buka aplikasi luar (misal WhatsApp/Chrome): tunjukkan bahwa Dynamic Island dan Status Bar iOS 
+     tetap melayang di atas aplikasi luar tersebut via `IOSOverlayService`.
+
+5. MENIT 5: iROOT TOOLS & KESIMPULAN ARSITEKTUR
+   - Tunjukkan iRoot Tools: pemantau RAM/CPU, terminal root, dan kemampuan mematikan 
+     SystemUI Android bawaan tanpa merusak sistem.
+   - Tutup presentasi dengan menegaskan bahwa proyek ini adalah bukti kehebatan Kotlin dan 
+     Jetpack Compose dalam membangun ekosistem antarmuka paling canggih di dunia mobile.
+
+================================================================================
+[AKHIR MASTER SYSTEM BLUEPRINT - iLAUNCHER / VIRTUAL iOS 26 OS]
+================================================================================

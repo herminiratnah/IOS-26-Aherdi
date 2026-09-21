@@ -4,8 +4,8 @@ import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.draggable
-import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -19,6 +19,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -26,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.AppId
 import com.example.ui.theme.*
+import com.example.util.IOSFeedbackHelper
 import com.example.viewmodel.IOSViewModel
 
 @Composable
@@ -48,6 +51,7 @@ fun IOSControlCenter(
     val musicProgress by viewModel.musicProgress.collectAsState()
     val musicCurrentTimeStr by viewModel.musicCurrentTimeStr.collectAsState()
     val musicDurationStr by viewModel.musicDurationStr.collectAsState()
+    val currentFocus by viewModel.currentFocusMode.collectAsState()
 
     AnimatedVisibility(
         visible = isOpen,
@@ -111,14 +115,20 @@ fun IOSControlCenter(
                                     icon = Icons.Rounded.Flight,
                                     isActive = airplaneMode,
                                     activeColor = IOSOrange,
-                                    onClick = { viewModel.toggleAirplaneMode() }
+                                    onClick = {
+                                        IOSFeedbackHelper.vibrateLight(context)
+                                        viewModel.toggleAirplaneMode()
+                                    }
                                 )
                                 // Cellular Data
                                 ControlCircleIcon(
                                     icon = Icons.Rounded.SignalCellularAlt,
                                     isActive = cellularEnabled,
                                     activeColor = IOSGreen,
-                                    onClick = { viewModel.toggleCellular() }
+                                    onClick = {
+                                        IOSFeedbackHelper.vibrateLight(context)
+                                        viewModel.toggleCellular()
+                                    }
                                 )
                             }
                             Row(
@@ -130,14 +140,20 @@ fun IOSControlCenter(
                                     icon = Icons.Rounded.Wifi,
                                     isActive = wifiEnabled,
                                     activeColor = IOSBlue,
-                                    onClick = { viewModel.toggleWifi() }
+                                    onClick = {
+                                        IOSFeedbackHelper.vibrateLight(context)
+                                        viewModel.toggleWifi()
+                                    }
                                 )
                                 // Bluetooth
                                 ControlCircleIcon(
                                     icon = Icons.Rounded.Bluetooth,
                                     isActive = bluetoothEnabled,
                                     activeColor = IOSBlue,
-                                    onClick = { viewModel.toggleBluetooth() }
+                                    onClick = {
+                                        IOSFeedbackHelper.vibrateLight(context)
+                                        viewModel.toggleBluetooth()
+                                    }
                                 )
                             }
                         }
@@ -296,53 +312,106 @@ fun IOSControlCenter(
                     modifier = Modifier.fillMaxWidth().height(160.dp),
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    // Two small cards: Rotation Lock & Screen Mirror
+                    // Left 2-part block: Rotation/Mirror + Focus Tile
                     Column(
                         modifier = Modifier.weight(1f).fillMaxHeight(),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        // Rotation lock
+                        // Rotation lock & Screen Mirror in one row
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f)
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(Color(0x40FFFFFF))
-                                .clickable { },
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
+                            modifier = Modifier.fillMaxWidth().weight(1f),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Rounded.ScreenRotation,
-                                contentDescription = "Rotation Lock",
-                                tint = Color.White,
-                                modifier = Modifier.size(24.dp)
-                            )
+                            // Rotation lock
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(Color(0x40FFFFFF))
+                                    .clickable {
+                                        IOSFeedbackHelper.vibrateLight(context)
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.ScreenRotation,
+                                    contentDescription = "Rotation Lock",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                            // Screen Mirror / AirPlay
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(Color(0x40FFFFFF))
+                                    .clickable {
+                                        IOSFeedbackHelper.vibrateLight(context)
+                                        viewModel.openShareSheet("Layar iPhone")
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Cast,
+                                    contentDescription = "AirPlay",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
                         }
-                        // Screen Mirror
-                        Row(
+
+                        // iOS Focus Tile
+                        val isFocusActive = currentFocus != com.example.model.FocusMode.OFF
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f)
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(Color(0x40FFFFFF))
-                                .clickable { },
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(
+                                    if (isFocusActive) Color(currentFocus.colorLong).copy(alpha = 0.9f)
+                                    else Color(0x40FFFFFF)
+                                )
+                                .clickable {
+                                    IOSFeedbackHelper.vibrateLight(context)
+                                    viewModel.toggleFocusMode(context)
+                                }
+                                .padding(horizontal = 12.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Cast,
-                                contentDescription = "AirPlay",
-                                tint = Color.White,
-                                modifier = Modifier.size(24.dp)
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = when (currentFocus) {
+                                        com.example.model.FocusMode.DO_NOT_DISTURB -> Icons.Rounded.NightlightRound
+                                        com.example.model.FocusMode.WORK -> Icons.Rounded.Work
+                                        com.example.model.FocusMode.PERSONAL -> Icons.Rounded.Person
+                                        com.example.model.FocusMode.SLEEP -> Icons.Rounded.Bedtime
+                                        else -> Icons.Rounded.NightlightRound
+                                    },
+                                    contentDescription = "Focus",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Text(
+                                    text = if (isFocusActive) currentFocus.label else "Fokus",
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
                         }
                     }
+
 
                     // Brightness Vertical Slider
                     VerticalIOSSlider(
                         value = brightness,
-                        onValueChange = { viewModel.setBrightness(it) },
+                        onValueChange = { viewModel.setBrightness(it, context) },
                         icon = Icons.Rounded.WbSunny,
                         modifier = Modifier.weight(0.5f).fillMaxHeight()
                     )
@@ -350,7 +419,7 @@ fun IOSControlCenter(
                     // Volume Vertical Slider
                     VerticalIOSSlider(
                         value = volume,
-                        onValueChange = { viewModel.setVolume(it) },
+                        onValueChange = { viewModel.setVolume(it, context) },
                         icon = Icons.Rounded.VolumeUp,
                         modifier = Modifier.weight(0.5f).fillMaxHeight()
                     )
@@ -367,7 +436,10 @@ fun IOSControlCenter(
                         isActive = flashlightEnabled,
                         activeColor = IOSYellow,
                         label = "Flashlight",
-                        onClick = { viewModel.toggleFlashlight(context) },
+                        onClick = {
+                            IOSFeedbackHelper.vibrateMedium(context)
+                            viewModel.toggleFlashlight(context)
+                        },
                         modifier = Modifier.weight(1f)
                     )
                     // Calculator
@@ -518,29 +590,44 @@ fun VerticalIOSSlider(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     modifier: Modifier = Modifier
 ) {
-    var dragProgress by remember(value) { mutableStateOf(value) }
+    var sliderHeightPx by remember { mutableFloatStateOf(1f) }
+    val currentFraction = value.coerceIn(0.01f, 1f)
 
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(22.dp))
             .background(Color(0x40FFFFFF))
-            .draggable(
-                orientation = Orientation.Vertical,
-                state = rememberDraggableState { delta ->
-                    // Drag up increases, drag down decreases
-                    val change = -delta / 250f
-                    val newProgress = (dragProgress + change).coerceIn(0f, 1f)
-                    dragProgress = newProgress
-                    onValueChange(newProgress)
+            .onGloballyPositioned { coordinates ->
+                if (coordinates.size.height > 0) {
+                    sliderHeightPx = coordinates.size.height.toFloat()
                 }
-            ),
+            }
+            .pointerInput(sliderHeightPx) {
+                detectTapGestures { offset ->
+                    if (sliderHeightPx > 0f) {
+                        val fraction = ((sliderHeightPx - offset.y) / sliderHeightPx).coerceIn(0.01f, 1f)
+                        onValueChange(fraction)
+                    }
+                }
+            }
+            .pointerInput(sliderHeightPx) {
+                detectVerticalDragGestures(
+                    onVerticalDrag = { change, _ ->
+                        change.consume()
+                        if (sliderHeightPx > 0f) {
+                            val fraction = ((sliderHeightPx - change.position.y) / sliderHeightPx).coerceIn(0.01f, 1f)
+                            onValueChange(fraction)
+                        }
+                    }
+                )
+            },
         contentAlignment = Alignment.BottomCenter
     ) {
         // Filled portion
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(dragProgress)
+                .fillMaxHeight(currentFraction)
                 .background(Color.White)
         )
 
@@ -554,7 +641,7 @@ fun VerticalIOSSlider(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = if (dragProgress > 0.2f) Color.Black else Color.White,
+                tint = if (currentFraction > 0.25f) Color.Black else Color.White,
                 modifier = Modifier.size(20.dp)
             )
         }

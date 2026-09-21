@@ -1,0 +1,307 @@
+================================================================================
+          DOKUMENTASI & RANGKUMAN EKSEKUTIF APLIKASI: iLAUNCHER / iOS 26 EXPERIENCE
+================================================================================
+Dibuat Untuk: Bahan Presentasi, Laporan Arsitektur & Knowledge Base
+Versi Rilis : iOS 26 Ambience Edition (Android Jetpack Compose Native Implementation)
+Tanggal     : September 2026
+
+--------------------------------------------------------------------------------
+DAFTAR ISI
+--------------------------------------------------------------------------------
+1. RINGKASAN EKSEKUTIF (EXECUTIVE SUMMARY)
+2. VALUE PROPOSITION & KEHEBATAN UTAMA (KEY HIGHLIGHTS)
+3. ARSITEKTUR SISTEM & PIPELINE (ARCHITECTURE & PIPELINES)
+4. MAPPING FITUR LENGKAP (FEATURE BREAKDOWN)
+   4.1. Lock Screen & Depth Effect Engine
+   4.2. SpringBoard & Homescreen Environment
+   4.3. Interactive System Overlays (Dynamic Island, Control & Notification Center)
+   4.4. Ekosistem 18+ Aplikasi Bawaan (Full Functional Core Apps)
+   4.5. Fitur Unik Spesial (iRoot Tools, Back Tap, StandBy Mode, Standalone Web Engine)
+5. ALUR PIPELINE DATA, STATE & HARDWARE (END-TO-END PIPELINES)
+6. TEKNOLOGI STACK & POLA IMPLEMENTASI
+7. KESIMPULAN & POIN KUNCI UNTUK PRESENTASI (PITCH TALKING POINTS)
+
+================================================================================
+1. RINGKASAN EKSEKUTIF (EXECUTIVE SUMMARY)
+================================================================================
+Aplikasi ini adalah sebuah "Sistem Operasi Alternatif Virtual" (Virtual iOS 26 
+Environment) berbasis Android murni yang dirancang menggunakan Kotlin dan 
+Jetpack Compose modern.
+
+Bukan sekadar launcher tema biasa (skin/launcher icon), aplikasi ini mengemulasi 
+arsitektur, logika interaksi, gesture fisika, persistensi data lokal, hingga 
+18+ modul aplikasi bawaan (Settings, Camera, Safari, Phone, Maps, Health, Wallet, 
+Music, dll.) dengan interaksi fungsional nyata tanpa tipuan mock data semata.
+
+Aplikasi ini menjembatani hardware Android (Sensor Giroskop, Accelerometer, 
+Kamera CameraX, Media Audio, Baterai, Wi-Fi, Telephony, Vibrator Haptic) ke dalam 
+antarmuka ultra-mewah standar iOS 26 Material Glassmorphism.
+
+================================================================================
+2. VALUE PROPOSITION & KEHEBATAN UTAMA (KEY HIGHLIGHTS)
+================================================================================
+1. AUTENTISITAS INTERAKSI TINGKAT TINGGI (PIXEL-PERFECT iOS 26 DESIGN)
+   - Efek Frosted Glass / Blurs dinamis (Backdrop blur, ultra-thin borders).
+   - Animasi Spring Physics (Inersia gesek, elastisitas pembuka/penutup aplikasi,
+     swipe gesture Home Bar fluiditas 60-120 FPS).
+   - Dynamic Island interaktif yang membesar (expand) saat disentuh untuk pemutar 
+     musik, timer, status panggilan, dan navigasi.
+
+2. LOCK SCREEN DENGAN iOS 26 DEPTH EFFECT ENGINE (JAM DI BALIK OBJEK)
+   - Kemampuan meletakkan angka jam raksasa di belakang siluet subjek wallpaper
+     (seperti puncak gunung Alpen, busur planet kosmik, bukit pasir, atau skyline gedung).
+   - Kustomisasi font jam (SF Pro, Rounded, Serif, Monospace, Bold Modern), 
+     warna palet gradasi, serta mini widget (cuaca, baterai, kalender).
+
+3. ZERO-COMPROMISE DUAL INTEGRATION (HYBRID ANDROID-iOS)
+   - Mampu membuka aplikasi internal iOS virtual dan juga meluncurkan aplikasi 
+     Android asli yang terpasang di perangkat melalui App Library.
+   - Sinergi izin Android (CameraX, Telepon, Audio, Biometrik/Face ID simulation,
+     Bluetooth, Wi-Fi toggle).
+
+4. FULL OFFLINE-FIRST PERSISTENCE ARCHITECTURE
+   - Seluruh perubahan konfigurasi (wallpaper, passcode, kartu kredit Apple Wallet,
+     catatan Apple Notes, kontak telepon, riwayat browser Safari, preferensi tema, 
+     widget lockscreen) tersimpan aman di penyimpanan lokal (SharedPreference & Room DB)
+     sehingga data tidak pernah hilang saat aplikasi ditutup.
+
+5. FITUR KHUSUS POWER USER & DEVELOPER
+   - Fitur "iRoot Tools": Terminal virtual Android, pemantau resource (RAM/CPU/FPS),
+     tweaks DPI, dan sandbox control.
+   - "Back Tap Gesture": Deteksi ketukan ganda/tripel di belakang bodi HP via 
+     accelerometer sensor untuk memicu aksi kustom (senter, screenshot, mute, dll.).
+   - "StandBy Mode": Tampilan jam meja lanskap estetik bergaya iOS StandBy saat dicas.
+
+================================================================================
+3. ARSITEKTUR SISTEM & PIPELINE (ARCHITECTURE & PIPELINES)
+================================================================================
+Arsitektur aplikasi dibangun di atas prinsip Clean Architecture & Single Activity 
+Multi-Screen Compose Architecture yang dikendalikan oleh sebuah ViewModel terpusat 
+(`IOSViewModel.kt`) sebagai Single Source of Truth (SSOT).
+
++-------------------------------------------------------------------------------+
+|                             LAPISAN PRESENTASI (UI)                           |
+|  [Lock Screen]  [SpringBoard/Home]  [Dynamic Island]  [Control/Notif Center]  |
+|  [App Switcher] [Siri Overlay]      [Spotlight Search][AssistiveTouch View]   |
++-------------------------------------------------------------------------------+
+                                      |
+                                      v
++-------------------------------------------------------------------------------+
+|                       STATE MANAGEMENT (IOSViewModel)                         |
+|  - Device Lock State (Passcode, Face ID, Biometric)                           |
+|  - Running Apps Backstack (AppId Navigation, Memory State)                    |
+|  - Real-time Hardware Telemetry (Battery, Wi-Fi, Cell, Audio, Flashlight)     |
+|  - Dynamic Island Expansion State (Music, Stopwatch, Call, Battery)           |
+|  - Appearance Settings (Dark Mode, Depth Effect, Wallpaper, Icon Grid)        |
++-------------------------------------------------------------------------------+
+                                      |
+                   +------------------+------------------+
+                   v                                     v
++-------------------------------------+   +-------------------------------------+
+|      HARDWARE & PLATFORM ADAPTERS   |   |     DATA & PERSISTENCE LAYER        |
+|  - CameraX (Kamera & Flashlight)    |   |  - IOSPersistenceManager            |
+|  - Audio Focus & MediaPlayer        |   |    (SharedPrefs / Local Key-Value)  |
+|  - SensorManager (Shake & BackTap)  |   |  - Notes, Contacts, History DB      |
+|  - AudioManager / HapticFeedback    |   |  - Wallpaper Assets & File Storage  |
+|  - ConnectivityManager (Network)    |   |  - Wallet Cards & Safari Bookmarks  |
++-------------------------------------+   +-------------------------------------+
+
+================================================================================
+4. MAPPING FITUR LENGKAP (FEATURE BREAKDOWN)
+================================================================================
+
+4.1. LOCK SCREEN & DEPTH EFFECT ENGINE (`IOSLockScreenView.kt`)
+--------------------------------------------------------------------------------
+- Real-time Time & Date Display dengan format dinamis dan multi-bahasa.
+- Depth Effect Wallpaper: Jam berada di lapisan tengah (antara background langit
+  dan foreground subjek gunung/planet/gedung).
+- Keypad Passcode Ergonomis: Tombol bulat diameter 80dp bergaya frosted glass,
+  lengkap dengan feedback getar haptik, suara 'click' mekanik iOS, dan animasi
+  pegas goyang (shake animation) jika PIN salah.
+- Shortcut Bawah Layar: Akses instan senter (Flashlight) dan Kamera tanpa buka kunci.
+- Face ID Engine: Simulasi autentikasi biometrik dengan ikon gembok terbuka otomatis.
+- Lock Screen Customizer: Long-press di layar kunci memunculkan panel pengubah font,
+  warna aksen jam, dan pemilihan widget.
+
+4.2. SPRINGBOARD & HOMESCREEN ENVIRONMENT (`SpringBoardScreen.kt`)
+--------------------------------------------------------------------------------
+- Multi-page Homescreen Grid dengan indikator titik halaman halus.
+- Jiggle Mode (Edit Mode): Ikon bergoyang halus saat ditekan lama dengan badge
+  tanda silang (-) untuk menghapus atau menata ulang tata letak aplikasi.
+- Widget Stack Dinamis: Widget Jam Analog, Kalender, Cuaca, Galeri Foto, Baterai,
+  dan Catatan yang terintegrasi secara visual.
+- Dock Bar Bawah: 4 aplikasi prioritas (Phone, Safari, Messages, Music) dengan
+  latar belakang material frosted glass.
+- Today View (Halaman Kiri Terjauh): Kumpulan kartu widget informatif lengkap.
+- App Library (Halaman Kanan Terjauh): Kategorisasi aplikasi otomatis ke dalam
+  folder (Utilities, Social, Entertainment, Productivity, Developer).
+- Spotlight Search: Tarik layar ke bawah untuk memunculkan bilah pencarian universal
+  (mencari aplikasi internal, kontak, maupun web Safari secara instan).
+
+4.3. OVERLAY SISTEM INTERAKTIF
+--------------------------------------------------------------------------------
+- Dynamic Island (`DynamicIsland.kt`):
+  Pil hitam di bagian atas layar kamera yang secara adaptif dapat mengecil atau
+  membesar (Compact, Expanded, Mini Pill) untuk memuat info musik yang berputar,
+  status pengisian daya, panggilan telepon aktif, dan hitung mundur timer.
+- Control Center (`IOSControlCenter.kt`):
+  Ditarik dari pojok kanan atas. Menampilkan slider vertikal kecerahan layar,
+  slider volume, toggle Wi-Fi, Bluetooth, Airplane Mode, Cellular, Airdrop,
+  Focus/DND, Senter, Kalkulator, dan Screen Mirroring.
+- Notification Center (`IOSNotificationCenter.kt`):
+  Ditarik dari pojok kiri atas/tengah. Menampilkan daftar notifikasi bertumpuk
+  (stacked notifications) dengan tombol bersihkan (Clear all).
+- iOS App Switcher / Multitasking (`IOSAppSwitcher.kt`):
+  Geser Home Bar ke atas dan tahan untuk melihat kartu aplikasi yang sedang berjalan,
+  lengkap dengan gesture 'flick up' untuk menutup aplikasi (kill task).
+- AssistiveTouch (`AssistiveTouchView.kt`):
+  Tombol pintas melayang virtual di tepi layar yang dapat dibuka untuk mengakses
+  Home, Control Center, Siri, Device Lock, dan Volume.
+- StandBy Mode (`IOSStandByOverlay.kt`):
+  Aktif otomatis saat perangkat dalam posisi lanskap + sedang diisi daya listrik.
+
+4.4. EKOSISTEM 18+ APLIKASI VIRTUAL BAWAAN
+--------------------------------------------------------------------------------
+1. Phone (`PhoneApp.kt`): Dial pad suara sentuhan, tab Favorit, Kontak, Panggilan Terakhir,
+   dan voicemail.
+2. Messages (`MessagesApp.kt`): Percakapan bergaya iMessage gelembung biru/hijau,
+   balas pesan, emoji picker, dan timestamp.
+3. Safari (`SafariApp.kt` + `IOSWebEngineView.kt`): Web browser nyata bertenaga
+   Android WebView, dengan tab bar melayang di bawah khas iOS, bookmark, dan mode privat.
+4. Camera (`CameraApp.kt`): Kamera nyata bertenaga CameraX dengan tombol shutter,
+   sakelar flash, zoom slider, dan galeri preview instan.
+5. Photos (`PhotosApp.kt`): Galeri foto lokal dengan layout grid persegi rapi,
+   album, dan penampil foto fullscreen.
+6. Settings (`SettingsApp.kt` & `SettingsSubScreens.kt`): Pengaturan super detail
+   (Wi-Fi, Bluetooth, Tampilan, Wallpaper, Face ID & Passcode, Baterai & Battery Health,
+   Aksesibilitas, Back Tap, Suara & Haptik, Reset).
+7. Music (`MusicApp.kt`): Pemutar musik modern dengan album art, lirik sinkron,
+   slider durasi, kontrol play/pause/skip yang terhubung ke Dynamic Island.
+8. Weather (`WeatherApp.kt`): Animasi cuaca latar dinamis (hujan, cerah, berawan),
+   suhu per jam, dan ramalan cuaca mingguan.
+9. Calculator (`CalculatorApp.kt`): Tombol bulat warna oranye/abu-abu khas iOS,
+   operasi hitung cepat dan gesture swipe untuk hapus angka terakhir.
+10. Notes (`NotesApp.kt`): Editor catatan kaya teks, folder catatan, pencarian,
+    dan penyimpanan permanen ke memori lokal.
+11. Reminders (`RemindersApp.kt`): Daftar tugas checklist (To-Do list) dengan
+    kategori Today, Scheduled, All, dan Flagged.
+12. Calendar (`CalendarApp.kt`): Tampilan kalender bulanan dan harian dengan event schedule.
+13. Clock (`ClockApp.kt`): World Clock, Alarm interaktif, Stopwatch dengan lap table,
+    dan Timer yang terintegrasi ke Dynamic Island.
+14. Health (`HealthApp.kt`): Cincin aktivitas (Move, Exercise, Stand Ring),
+    pencatat langkah dan estimasi kalori.
+15. Wallet (`WalletApp.kt`): Apple Pay virtual card visualizer, tambah kartu debit/kredit,
+    dan riwayat transaksi digital.
+16. Maps (`MapsApp.kt`): Tampilan peta navigasi, pencarian POI, dan rute navigasi.
+17. App Store (`AppStoreApp.kt`): Showcase aplikasi populer dan peluncur aplikasi internal.
+18. FaceTime (`FaceTimeApp.kt`): Simulasi panggilan video dengan preview kamera langsung.
+19. Stocks, Podcasts, Books, TV: Media hub konten terkurasi dan watchlist saham real-time.
+
+4.5. FITUR KHUSUS & KEUNGGULAN TAMBAHAN
+--------------------------------------------------------------------------------
+- iRoot Tools (`RootToolsApp.kt`):
+  Dashboard utilitas untuk inspeksi sistem Android (arsitektur prosesor, pemakaian
+  RAM real-time, FPS counter overlay `IOSFpsOverlay.kt`, terminal mini command, 
+  dan pengaturan preferensi pengembang).
+- Back Tap Gesture (`BackTapSubPage.kt`):
+  Memanfaatkan sensor akselerometer perangkat untuk mendeteksi getaran fisik ketukan
+  dua kali (Double Tap) atau tiga kali (Triple Tap) di casing belakang smartphone.
+- Haptic & Audio Feedback Suite (`IOSFeedbackHelper.kt`):
+  Menghasilkan pola getaran mikro halus (Haptic Taptic Engine) untuk setiap sentuhan
+  tombol, scroll picker, sakelar switch, dan suara khas klik keyboard iOS.
+
+================================================================================
+5. ALUR PIPELINE DATA, STATE & HARDWARE (END-TO-END PIPELINES)
+================================================================================
+
+PIPELINE 1: ALUR BUKA KUNCI (LOCK SCREEN TO HOMESCREEN)
+--------------------------------------------------------------------------------
+1. User menyalakan layar -> `IOSLockScreenView` ter-trigger.
+2. Sensor biometrik / Face ID memeriksa wajah via delay coroutine:
+   - Jika Face ID aktif -> Animasi scan -> Gembok terbuka -> Play unlock sound -> 
+     Transisi `isDeviceLocked = false`.
+   - Jika menggunakan Passcode -> User mengetuk layar / geser ke atas -> 
+     Keypad muncul -> Input 4 digit angka -> Verifikasi dengan `userPasscode`:
+     * Match   : Haptic sukses -> Suara buka kunci -> Masuk ke SpringBoard.
+     * Mismatch: Animasi spring shake keypad -> Haptic error -> Reset input.
+
+PIPELINE 2: ALUR DEPTH EFFECT WALLPAPER RENDERING
+--------------------------------------------------------------------------------
+1. `IOSDepthWallpaperRenderer` membaca `LockScreenConfig` (theme: mountain/planet/dune).
+2. Canvas Level 1: Menggambar latar langit, gradasi horizon, dan partikel latar.
+3. Canvas Level 2: Merender Teks Waktu / Jam (misal "09:41") dengan font dan warna
+   terpilih pada posisi vertikal strategis.
+4. Canvas Level 3: Merender Subjek Foreground (Puncak Gunung / Siluet Planet)
+   yang menimpa (overlapping) bagian bawah angka jam.
+5. Hasil: Menciptakan ilusi optik 3D seolah-olah jam berdiri tegak di belakang 
+   puncak gunung di alam nyata.
+
+PIPELINE 3: ALUR SISTEM NAVIGASI & GESTURE (HOME BAR & APP SWITCHER)
+--------------------------------------------------------------------------------
+1. Dari aplikasi manapun, `HomeBar` selalu melayang di dasar layar.
+2. User menggeser (swipe) ke atas secara cepat:
+   -> Animasi scaling down jendela aplikasi saat ini.
+   -> `activeAppId` diset ke null -> Kembali ke SpringBoard (Home).
+3. User menggeser ke atas dan menahan jari (swipe & hold):
+   -> `isAppSwitcherOpen = true`.
+   -> Grid kartu aplikasi aktif ditampilkan secara horizontal bergaya iOS Carousel.
+   -> Geser kartu ke atas -> Aplikasi ditutup dari memori.
+
+PIPELINE 4: ALUR DYNAMIC ISLAND MULTI-TASKING
+--------------------------------------------------------------------------------
+1. Aplikasi Music memutar lagu atau Clock menyalakan Timer.
+2. `IOSViewModel.updateDynamicIsland()` memancarkan state baru ke `StateFlow<DynamicIslandData>`.
+3. Komponen `DynamicIsland` di bilah status mendeteksi event -> Mengembang secara halus
+   (Spring animate) menampilkan visualizer gelombang suara atau countdown timer.
+4. User mengetuk Dynamic Island -> Dynamic Island membesar menjadi banner interaktif
+   (Expanded view) dengan tombol kendali (Pause, Skip, Stop).
+
+PIPELINE 5: ALUR BACK TAP HARDWARE DETECTION
+--------------------------------------------------------------------------------
+1. `SensorEventListener` mendaftarkan pembacaan akselerometer pada sumbu Z (Z-axis peak).
+2. Ketika terdeteksi lonjakan percepatan gravitasi spesifik dalam rentang jendela 
+   waktu 250-400ms:
+3. Algoritma filter membedakan antara guncangan langkah kaki vs ketukan jari di bodi HP.
+4. Jika kriteria Double/Triple tap terpenuhi -> Memanggil aksi terpilih (Toggle Flashlight,
+   Mute Audio, atau Screenshot).
+
+================================================================================
+6. TEKNOLOGI STACK & POLA IMPLEMENTASI
+================================================================================
+- Bahasa Pemrograman : Kotlin 100%
+- Framework UI        : Android Jetpack Compose (Declarative UI)
+- Desain Sistem       : Material 3 adaptif yang dirombak ke iOS Human Interface Guidelines
+- State Management    : Kotlin StateFlow, SharedFlow, State, ViewModel Architecture
+- Kamera Hardware     : Jetpack CameraX (Lifecycle, Preview, ImageCapture)
+- Web Rendering       : Android WebKit WebView dengan hardware acceleration
+- Image Loading       : Coil Compose (Async Image Loading & Caching)
+- Persistence         : Android SharedPreferences dengan JSON Serializer (`IOSPersistenceManager`)
+- Concurrency         : Kotlin Coroutines (`viewModelScope`, `LaunchedEffect`)
+- Audio & Haptics     : ToneGenerator, SoundPool, VibrationEffect (Predefined Haptics)
+
+================================================================================
+7. KESIMPULAN & POIN KUNCI UNTUK PRESENTASI (PITCH TALKING POINTS)
+================================================================================
+Saat mempresentasikan aplikasi ini di depan audiens atau penguji, gunakan 4 poin 
+utama ini:
+
+1. "Bukan Sekadar Launcher, Melainkan Virtual Sub-OS":
+   Tunjukkan bahwa aplikasi ini memiliki ekosistem aplikasi utuh di dalamnya 
+   (dari kalkulator, browser, pemutar musik, hingga lock screen dengan Depth Effect).
+
+2. "Tingkat Presisi dan Sensasi Fisika (Craftsmanship)":
+   Sorot kehalusan animasi geser Home Bar, pantulan pegas (spring feedback), 
+   sensasi getar taptic saat menekan tombol keypad, dan responsivitas Dynamic Island.
+
+3. "Inovasi Depth Effect Tanpa Beban GPU Berat":
+   Jelaskan bahwa efek jam di balik gunung dibangun dengan algoritma multi-layer canvas
+   yang sangat ringan, hemat baterai, dan berjalan mulus tanpa lag di perangkat Android.
+
+4. "Kombinasi Terbaik Dua Dunia (Android x iOS)":
+   Pengguna mendapatkan kemewahan dan kerapian estetika iOS 26, namun tetap mempertahankan
+   kekuatan keterbukaan Android (akses kamera, file lokal, hardware sensor, dan integrasi
+   aplikasi lokal).
+
+================================================================================
+[AKHIR DOKUMEN PRESENTASI]
+================================================================================

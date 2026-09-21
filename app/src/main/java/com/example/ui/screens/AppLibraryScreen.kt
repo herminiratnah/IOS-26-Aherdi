@@ -2,11 +2,17 @@ package com.example.ui.screens
 
 import android.content.Context
 import android.graphics.Bitmap
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
+import coil.compose.AsyncImage
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -38,6 +44,7 @@ import com.example.ui.theme.*
 import com.example.viewmodel.IOSViewModel
 import com.example.viewmodel.InstalledAppItem
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun AppLibraryScreen(
     viewModel: IOSViewModel,
@@ -45,8 +52,20 @@ fun AppLibraryScreen(
 ) {
     val context = LocalContext.current
     val installedApps by viewModel.installedApps.collectAsState()
+    val customAppIcons by viewModel.customAppIcons.collectAsState()
     var searchQuery by remember { mutableStateOf("") }
     var selectedCategoryFolder by remember { mutableStateOf<String?>(null) }
+    var selectedAppForContextMenu by remember { mutableStateOf<InstalledAppItem?>(null) }
+    var targetAppKeyForCustomIcon by remember { mutableStateOf<String?>(null) }
+
+    val iconPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null && targetAppKeyForCustomIcon != null) {
+            viewModel.setCustomAppIcon(targetAppKeyForCustomIcon!!, uri.toString(), context)
+            targetAppKeyForCustomIcon = null
+        }
+    }
 
     // Authentic categories matching user screenshot
     val categories = listOf(
@@ -146,15 +165,19 @@ fun AppLibraryScreen(
                 contentPadding = PaddingValues(bottom = 32.dp)
             ) {
                 items(filteredApps) { app ->
+                    val appKey = app.builtInId?.name ?: app.packageName
+                    val customIconUri = customAppIcons[appKey]
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(14.dp))
                             .background(Color(0x30000000))
                             .border(0.5.dp, Color(0x20FFFFFF), RoundedCornerShape(14.dp))
-                            .clickable {
-                                viewModel.launchDeviceApp(context, app)
-                            }
+                            .combinedClickable(
+                                onClick = { viewModel.launchDeviceApp(context, app) },
+                                onLongClick = { selectedAppForContextMenu = app }
+                            )
                             .padding(horizontal = 14.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(14.dp)
@@ -166,7 +189,14 @@ fun AppLibraryScreen(
                                 .background(Color(app.iconColor)),
                             contentAlignment = Alignment.Center
                         ) {
-                            if (app.iconBitmap != null) {
+                            if (customIconUri != null) {
+                                AsyncImage(
+                                    model = customIconUri,
+                                    contentDescription = app.appName,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else if (app.iconBitmap != null) {
                                 Image(
                                     bitmap = app.iconBitmap.asImageBitmap(),
                                     contentDescription = app.appName,
@@ -218,8 +248,12 @@ fun AppLibraryScreen(
                     AppLibraryFolderCard(
                         folderTitle = categoryName,
                         apps = appsInCat,
+                        customAppIcons = customAppIcons,
                         onAppClick = { app ->
                             viewModel.launchDeviceApp(context, app)
+                        },
+                        onAppLongClick = { app ->
+                            selectedAppForContextMenu = app
                         },
                         onFolderClick = {
                             selectedCategoryFolder = categoryName
@@ -253,27 +287,43 @@ fun AppLibraryScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(appsInFolder) { app ->
+                        val appKey = app.builtInId?.name ?: app.packageName
+                        val customIconUri = customAppIcons[appKey]
+
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(12.dp))
                                 .background(Color(0x20FFFFFF))
-                                .clickable {
-                                    selectedCategoryFolder = null
-                                    viewModel.launchDeviceApp(context, app)
-                                }
+                                .combinedClickable(
+                                    onClick = {
+                                        selectedCategoryFolder = null
+                                        viewModel.launchDeviceApp(context, app)
+                                    },
+                                    onLongClick = {
+                                        selectedCategoryFolder = null
+                                        selectedAppForContextMenu = app
+                                    }
+                                )
                                 .padding(horizontal = 12.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(RoundedCornerShape(11.dp))
-                                    .background(Color(app.iconColor)),
+                                .size(44.dp)
+                                .clip(RoundedCornerShape(11.dp))
+                                .background(Color(app.iconColor)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                if (app.iconBitmap != null) {
+                                if (customIconUri != null) {
+                                    AsyncImage(
+                                        model = customIconUri,
+                                        contentDescription = app.appName,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else if (app.iconBitmap != null) {
                                     Image(
                                         bitmap = app.iconBitmap.asImageBitmap(),
                                         contentDescription = app.appName,
@@ -306,6 +356,137 @@ fun AppLibraryScreen(
             }
         )
     }
+
+    // 3D Touch / Long Press Context Menu Dialog for any app
+    selectedAppForContextMenu?.let { app ->
+        val appKey = app.builtInId?.name ?: app.packageName
+        val customIconUri = customAppIcons[appKey]
+
+        AlertDialog(
+            onDismissRequest = { selectedAppForContextMenu = null },
+            containerColor = Color(0xFA2C2C2E),
+            shape = RoundedCornerShape(22.dp),
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(52.dp)
+                            .clip(RoundedCornerShape(13.dp))
+                            .background(Color(app.iconColor)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (customIconUri != null) {
+                            AsyncImage(
+                                model = customIconUri,
+                                contentDescription = app.appName,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else if (app.iconBitmap != null) {
+                            Image(
+                                bitmap = app.iconBitmap.asImageBitmap(),
+                                contentDescription = app.appName,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Icon(
+                                imageVector = getAppCategoryIcon(app),
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                    }
+                    Column {
+                        Text(
+                            text = app.appName,
+                            color = Color.White,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = app.category,
+                            color = Color.White.copy(alpha = 0.6f),
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    // Open App
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                val target = app
+                                selectedAppForContextMenu = null
+                                viewModel.launchDeviceApp(context, target)
+                            }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Buka Aplikasi", color = Color.White, fontSize = 15.sp)
+                        Icon(Icons.Rounded.OpenInNew, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                    }
+
+                    HorizontalDivider(color = Color(0x30FFFFFF), thickness = 0.5.dp)
+
+                    // Change Icon
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                targetAppKeyForCustomIcon = appKey
+                                selectedAppForContextMenu = null
+                                iconPickerLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Ganti Ikon (Custom Icon)", color = Color(0xFF0A84FF), fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                        Icon(Icons.Rounded.Image, contentDescription = null, tint = Color(0xFF0A84FF), modifier = Modifier.size(18.dp))
+                    }
+
+                    if (customIconUri != null) {
+                        HorizontalDivider(color = Color(0x30FFFFFF), thickness = 0.5.dp)
+
+                        // Reset Icon
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable {
+                                    viewModel.resetCustomAppIcon(appKey, context)
+                                    selectedAppForContextMenu = null
+                                }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Kembalikan Ikon Bawaan", color = Color(0xFFFF453A), fontSize = 15.sp)
+                            Icon(Icons.Rounded.Restore, contentDescription = null, tint = Color(0xFFFF453A), modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { selectedAppForContextMenu = null }) {
+                    Text("Batal", color = Color(0xFF0A84FF), fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                }
+            }
+        )
+    }
 }
 
 /**
@@ -315,7 +496,9 @@ fun AppLibraryScreen(
 fun AppLibraryFolderCard(
     folderTitle: String,
     apps: List<InstalledAppItem>,
+    customAppIcons: Map<String, String> = emptyMap(),
     onAppClick: (InstalledAppItem) -> Unit,
+    onAppLongClick: (InstalledAppItem) -> Unit,
     onFolderClick: () -> Unit
 ) {
     Column(
@@ -343,14 +526,26 @@ fun AppLibraryFolderCard(
                 ) {
                     val app0 = apps.getOrNull(0)
                     if (app0 != null) {
-                        FolderAppIcon(app = app0, onClick = { onAppClick(app0) })
+                        val k0 = app0.builtInId?.name ?: app0.packageName
+                        FolderAppIcon(
+                            app = app0,
+                            customIconUri = customAppIcons[k0],
+                            onClick = { onAppClick(app0) },
+                            onLongClick = { onAppLongClick(app0) }
+                        )
                     } else {
                         Spacer(modifier = Modifier.size(62.dp))
                     }
 
                     val app1 = apps.getOrNull(1)
                     if (app1 != null) {
-                        FolderAppIcon(app = app1, onClick = { onAppClick(app1) })
+                        val k1 = app1.builtInId?.name ?: app1.packageName
+                        FolderAppIcon(
+                            app = app1,
+                            customIconUri = customAppIcons[k1],
+                            onClick = { onAppClick(app1) },
+                            onLongClick = { onAppLongClick(app1) }
+                        )
                     } else {
                         Spacer(modifier = Modifier.size(62.dp))
                     }
@@ -363,7 +558,13 @@ fun AppLibraryFolderCard(
                 ) {
                     val app2 = apps.getOrNull(2)
                     if (app2 != null) {
-                        FolderAppIcon(app = app2, onClick = { onAppClick(app2) })
+                        val k2 = app2.builtInId?.name ?: app2.packageName
+                        FolderAppIcon(
+                            app = app2,
+                            customIconUri = customAppIcons[k2],
+                            onClick = { onAppClick(app2) },
+                            onLongClick = { onAppLongClick(app2) }
+                        )
                     } else {
                         Spacer(modifier = Modifier.size(62.dp))
                     }
@@ -371,7 +572,13 @@ fun AppLibraryFolderCard(
                     if (apps.size <= 4) {
                         val app3 = apps.getOrNull(3)
                         if (app3 != null) {
-                            FolderAppIcon(app = app3, onClick = { onAppClick(app3) })
+                            val k3 = app3.builtInId?.name ?: app3.packageName
+                            FolderAppIcon(
+                                app = app3,
+                                customIconUri = customAppIcons[k3],
+                                onClick = { onAppClick(app3) },
+                                onLongClick = { onAppLongClick(app3) }
+                            )
                         } else {
                             Spacer(modifier = Modifier.size(62.dp))
                         }
@@ -393,15 +600,25 @@ fun AppLibraryFolderCard(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    MiniClusterDot(apps.getOrNull(3))
-                                    MiniClusterDot(apps.getOrNull(4))
+                                    val app3 = apps.getOrNull(3)
+                                    val k3 = app3?.let { it.builtInId?.name ?: it.packageName }
+                                    MiniClusterDot(app3, customIconUri = k3?.let { customAppIcons[it] })
+
+                                    val app4 = apps.getOrNull(4)
+                                    val k4 = app4?.let { it.builtInId?.name ?: it.packageName }
+                                    MiniClusterDot(app4, customIconUri = k4?.let { customAppIcons[it] })
                                 }
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    MiniClusterDot(apps.getOrNull(5))
-                                    MiniClusterDot(apps.getOrNull(6))
+                                    val app5 = apps.getOrNull(5)
+                                    val k5 = app5?.let { it.builtInId?.name ?: it.packageName }
+                                    MiniClusterDot(app5, customIconUri = k5?.let { customAppIcons[it] })
+
+                                    val app6 = apps.getOrNull(6)
+                                    val k6 = app6?.let { it.builtInId?.name ?: it.packageName }
+                                    MiniClusterDot(app6, customIconUri = k6?.let { customAppIcons[it] })
                                 }
                             }
                         }
@@ -424,20 +641,33 @@ fun AppLibraryFolderCard(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun FolderAppIcon(
     app: InstalledAppItem,
-    onClick: () -> Unit
+    customIconUri: String? = null,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null
 ) {
     Box(
         modifier = Modifier
             .size(62.dp)
             .clip(RoundedCornerShape(15.dp))
             .background(Color(app.iconColor))
-            .clickable { onClick() },
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            ),
         contentAlignment = Alignment.Center
     ) {
-        if (app.iconBitmap != null) {
+        if (customIconUri != null) {
+            AsyncImage(
+                model = customIconUri,
+                contentDescription = app.appName,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+        } else if (app.iconBitmap != null) {
             Image(
                 bitmap = app.iconBitmap.asImageBitmap(),
                 contentDescription = app.appName,
@@ -456,7 +686,10 @@ fun FolderAppIcon(
 }
 
 @Composable
-fun MiniClusterDot(app: InstalledAppItem?) {
+fun MiniClusterDot(
+    app: InstalledAppItem?,
+    customIconUri: String? = null
+) {
     Box(
         modifier = Modifier
             .size(24.dp)
@@ -465,7 +698,14 @@ fun MiniClusterDot(app: InstalledAppItem?) {
         contentAlignment = Alignment.Center
     ) {
         if (app != null) {
-            if (app.iconBitmap != null) {
+            if (customIconUri != null) {
+                AsyncImage(
+                    model = customIconUri,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            } else if (app.iconBitmap != null) {
                 Image(
                     bitmap = app.iconBitmap.asImageBitmap(),
                     contentDescription = null,

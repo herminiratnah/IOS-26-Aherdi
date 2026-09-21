@@ -13,13 +13,16 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 
+import android.app.PendingIntent
+
 data class AppNotificationData(
     val packageName: String,
     val appName: String,
     val title: String,
     val message: String,
     val iconKey: String,
-    val accentColor: Long
+    val accentColor: Long,
+    val contentIntent: PendingIntent? = null
 )
 
 class IOSNotificationListenerService : NotificationListenerService() {
@@ -54,6 +57,16 @@ class IOSNotificationListenerService : NotificationListenerService() {
         // Skip our own app notifications
         if (pkg == packageName) return
 
+        // Skip internal android system notifications and services (e.g. systemui, android os, media session, battery alerts)
+        if (pkg == "android" ||
+            pkg.startsWith("com.android.systemui") ||
+            pkg.startsWith("com.google.android.gms") && (sbn.notification.flags and Notification.FLAG_FOREGROUND_SERVICE != 0) ||
+            pkg.contains("inputmethod") ||
+            pkg.contains("launcher")
+        ) {
+            return
+        }
+
         val notification = sbn.notification ?: return
         val extras = notification.extras ?: return
 
@@ -70,6 +83,7 @@ class IOSNotificationListenerService : NotificationListenerService() {
         // Skip empty or purely ongoing background service notifications
         if (title.isBlank() && text.isBlank()) return
         if ((notification.flags and Notification.FLAG_ONGOING_EVENT) != 0) return
+        if ((notification.flags and Notification.FLAG_FOREGROUND_SERVICE) != 0) return
 
         val pm = packageManager
         val appName = try {
@@ -100,10 +114,11 @@ class IOSNotificationListenerService : NotificationListenerService() {
                 AppNotificationData(
                     packageName = pkg,
                     appName = appName,
-                    title = if (title.isNotBlank()) "$appName: $title" else appName,
+                    title = if (title.isNotBlank()) title else appName,
                     message = text.ifBlank { "Pemberitahuan baru" },
                     iconKey = iconKey,
-                    accentColor = accentColor
+                    accentColor = accentColor,
+                    contentIntent = notification.contentIntent
                 )
             )
         }

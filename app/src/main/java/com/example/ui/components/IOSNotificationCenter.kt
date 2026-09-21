@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import com.example.model.AppId
 import com.example.model.ClockFontStyle
 import com.example.ui.theme.*
+import com.example.util.IOSFeedbackHelper
 import com.example.viewmodel.IOSViewModel
 
 @Composable
@@ -44,6 +45,10 @@ fun IOSNotificationCenter(
     val activeNotifications by viewModel.activeNotifications.collectAsState()
     val currentTime by viewModel.currentTimeFormatted.collectAsState()
     val currentDate by viewModel.currentDateFormatted.collectAsState()
+    val weatherData by viewModel.weatherData.collectAsState()
+    val batteryLevel by viewModel.batteryLevel.collectAsState()
+    val isCharging by viewModel.isBatteryCharging.collectAsState()
+    val currentFocus by viewModel.currentFocusMode.collectAsState()
 
     AnimatedVisibility(
         visible = isOpen,
@@ -127,12 +132,16 @@ fun IOSNotificationCenter(
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Rounded.Cloud,
+                            imageVector = when {
+                                weatherData.weatherCode in 61..82 -> Icons.Rounded.WaterDrop
+                                weatherData.weatherCode == 0 -> Icons.Rounded.WbSunny
+                                else -> Icons.Rounded.Cloud
+                            },
                             contentDescription = null,
                             tint = Color.White,
                             modifier = Modifier.size(14.dp)
                         )
-                        Text("28° Mostly Cloudy", color = Color.White, fontSize = 12.sp)
+                        Text("${weatherData.currentTemp}° ${weatherData.condition}", color = Color.White, fontSize = 12.sp)
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     // Battery Widget
@@ -145,12 +154,12 @@ fun IOSNotificationCenter(
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Rounded.BatteryChargingFull,
+                            imageVector = if (isCharging) Icons.Rounded.BatteryChargingFull else Icons.Rounded.BatteryStd,
                             contentDescription = null,
-                            tint = IOSGreen,
+                            tint = if (isCharging) IOSGreen else Color.White,
                             modifier = Modifier.size(14.dp)
                         )
-                        Text("85%", color = Color.White, fontSize = 12.sp)
+                        Text("$batteryLevel%", color = Color.White, fontSize = 12.sp)
                     }
                 }
 
@@ -343,6 +352,47 @@ fun IOSNotificationCenter(
 
                 Spacer(modifier = Modifier.weight(1f))
 
+                // Lock Screen Focus Pill
+                val isFocusActive = currentFocus != com.example.model.FocusMode.OFF
+                Box(
+                    modifier = Modifier
+                        .padding(bottom = 12.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(
+                            if (isFocusActive) Color(currentFocus.colorLong).copy(alpha = 0.85f)
+                            else Color(0x33FFFFFF)
+                        )
+                        .clickable {
+                            IOSFeedbackHelper.vibrateLight(context)
+                            viewModel.toggleFocusMode(context)
+                        }
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = when (currentFocus) {
+                                com.example.model.FocusMode.DO_NOT_DISTURB -> Icons.Rounded.NightlightRound
+                                com.example.model.FocusMode.WORK -> Icons.Rounded.Work
+                                com.example.model.FocusMode.PERSONAL -> Icons.Rounded.Person
+                                com.example.model.FocusMode.SLEEP -> Icons.Rounded.Bedtime
+                                else -> Icons.Rounded.NightlightRound
+                            },
+                            contentDescription = "Focus",
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = if (isFocusActive) currentFocus.label else "Fokus",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+
                 // Bottom Quick Action Buttons: Flashlight & Camera
                 Row(
                     modifier = Modifier
@@ -515,7 +565,7 @@ fun LockScreenCustomizerSheet(
                 .clickable(enabled = false) {}
                 .padding(20.dp)
                 .navigationBarsPadding(),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -523,7 +573,7 @@ fun LockScreenCustomizerSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Font & Color",
+                    text = "Lock Screen & Depth Effect",
                     color = Color.White,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold
@@ -537,8 +587,101 @@ fun LockScreenCustomizerSheet(
                 }
             }
 
+            // 1. DEPTH EFFECT TOGGLE (iOS 26 Keynote feature)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0x22FFFFFF))
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (config.depthEffectEnabled) IOSBlue else Color.Gray),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Layers,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Column {
+                        Text(
+                            text = "Depth Effect (Jam di Balik Objek)",
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = if (config.depthEffectEnabled) "Jam tersembunyi di balik gunung/subjek" else "Jam standar di atas wallpaper",
+                            color = Color.Gray,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+                Switch(
+                    checked = config.depthEffectEnabled,
+                    onCheckedChange = { isChecked ->
+                        onUpdateConfig { it.copy(depthEffectEnabled = isChecked) }
+                    },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = Color(0xFF34C759)
+                    )
+                )
+            }
+
+            // Depth Themes Selector (Mountain, Planet, Dune, Skyline, Glass)
+            if (config.depthEffectEnabled) {
+                Text("DEPTH SUBJECT THEME", color = Color.Gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                val themes = listOf(
+                    Pair("mountain", "Mountain Peak"),
+                    Pair("planet", "Planet Arc"),
+                    Pair("dune", "Sand Dune"),
+                    Pair("skyline", "Metropolis"),
+                    Pair("glass_ribbon", "Glass Prism")
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    themes.forEach { (themeKey, label) ->
+                        val isSelected = config.depthTheme == themeKey
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (isSelected) IOSBlue else Color(0x22FFFFFF))
+                                .clickable {
+                                    onUpdateConfig { it.copy(depthTheme = themeKey) }
+                                }
+                                .padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = label,
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
+            }
+
             // Font Style Picker
-            Text("FONT STYLE", color = Color.Gray, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text("FONT STYLE", color = Color.Gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -547,7 +690,7 @@ fun LockScreenCustomizerSheet(
                     val isSelected = config.fontStyle == style
                     Box(
                         modifier = Modifier
-                            .size(50.dp)
+                            .size(46.dp)
                             .clip(CircleShape)
                             .background(if (isSelected) IOSBlue else Color(0x33FFFFFF))
                             .clickable {
@@ -564,7 +707,7 @@ fun LockScreenCustomizerSheet(
                             text = "12",
                             color = Color.White,
                             fontFamily = fontF,
-                            fontSize = 18.sp,
+                            fontSize = 17.sp,
                             fontWeight = if (style == ClockFontStyle.BOLD_MODERN) FontWeight.Bold else FontWeight.Normal
                         )
                     }
@@ -572,7 +715,7 @@ fun LockScreenCustomizerSheet(
             }
 
             // Color Palette Picker
-            Text("CLOCK COLOR", color = Color.Gray, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text("CLOCK COLOR", color = Color.Gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
             val colors = listOf(
                 0xFFFFFFFF,
                 0xFF32ADE6, // iOS Cyan
@@ -590,7 +733,7 @@ fun LockScreenCustomizerSheet(
                     val isSelected = config.clockColorHex == hex
                     Box(
                         modifier = Modifier
-                            .size(36.dp)
+                            .size(34.dp)
                             .clip(CircleShape)
                             .background(Color(hex))
                             .clickable {
@@ -603,10 +746,71 @@ fun LockScreenCustomizerSheet(
                                 imageVector = Icons.Rounded.Check,
                                 contentDescription = null,
                                 tint = if (hex == 0xFFFFFFFF) Color.Black else Color.White,
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(16.dp)
                             )
                         }
                     }
+                }
+            }
+
+            // Widgets Quick Toggles
+            Text("LOCK SCREEN WIDGETS", color = Color.Gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Weather
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (config.showWeatherWidget) Color(0x3334C759) else Color(0x22FFFFFF))
+                        .clickable { onUpdateConfig { it.copy(showWeatherWidget = !it.showWeatherWidget) } }
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (config.showWeatherWidget) "✓ Weather" else "Weather",
+                        color = if (config.showWeatherWidget) Color(0xFF34C759) else Color.Gray,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
+                // Battery
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (config.showBatteryWidget) Color(0x3334C759) else Color(0x22FFFFFF))
+                        .clickable { onUpdateConfig { it.copy(showBatteryWidget = !it.showBatteryWidget) } }
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (config.showBatteryWidget) "✓ Battery" else "Battery",
+                        color = if (config.showBatteryWidget) Color(0xFF34C759) else Color.Gray,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
+                // Calendar
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (config.showCalendarWidget) Color(0x3334C759) else Color(0x22FFFFFF))
+                        .clickable { onUpdateConfig { it.copy(showCalendarWidget = !it.showCalendarWidget) } }
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (config.showCalendarWidget) "✓ Calendar" else "Calendar",
+                        color = if (config.showCalendarWidget) Color(0xFF34C759) else Color.Gray,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
             }
         }

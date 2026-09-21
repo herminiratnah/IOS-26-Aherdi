@@ -1,11 +1,12 @@
 package com.example.ui.components
 
-import com.example.R
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -17,15 +18,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
-import coil.compose.AsyncImage
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.AppId
+import com.example.util.IOSFeedbackHelper
 import com.example.viewmodel.IOSViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -37,6 +37,7 @@ fun IOSLockScreenView(
     viewModel: IOSViewModel,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val isLocked by viewModel.isDeviceLocked.collectAsState()
     val isPasscodeEnabled by viewModel.isPasscodeEnabled.collectAsState()
     val isFaceIdEnabled by viewModel.isFaceIdEnabled.collectAsState()
@@ -51,6 +52,8 @@ fun IOSLockScreenView(
     val wifiSignalLevel by viewModel.wifiSignalLevel.collectAsState()
     val cellularBars by viewModel.cellularSignalBars.collectAsState()
     val networkType by viewModel.networkType.collectAsState()
+    val lockScreenConfig by viewModel.lockScreenConfig.collectAsState()
+    val isCustomizeOpen by viewModel.isLockScreenCustomizeOpen.collectAsState()
 
     var showPasscodePad by remember { mutableStateOf(false) }
     var enteredPasscode by remember { mutableStateOf("") }
@@ -58,6 +61,7 @@ fun IOSLockScreenView(
     var isFaceIdScanning by remember { mutableStateOf(false) }
 
     val coroutineScope = rememberCoroutineScope()
+    val shakeOffset = remember { Animatable(0f) }
 
     val currentDateFormatted = remember {
         SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(Date())
@@ -67,13 +71,26 @@ fun IOSLockScreenView(
         if (isLocked) {
             enteredPasscode = ""
             showPasscodePad = false
+            IOSFeedbackHelper.playLockSound(context)
             if (isFaceIdEnabled) {
                 isFaceIdScanning = true
-                delay(1000)
+                delay(850)
                 isFaceIdScanning = false
-                // If passcode is not required or user enabled Face ID, unlock smoothly
+                IOSFeedbackHelper.vibrateSuccess(context)
+                IOSFeedbackHelper.playUnlockSound(context)
                 viewModel.unlockDevice()
             }
+        }
+    }
+
+    fun performUnlock() {
+        if (isPasscodeEnabled) {
+            showPasscodePad = true
+            IOSFeedbackHelper.vibrateLight(context)
+        } else {
+            IOSFeedbackHelper.vibrateSuccess(context)
+            IOSFeedbackHelper.playUnlockSound(context)
+            viewModel.unlockDevice()
         }
     }
 
@@ -86,33 +103,46 @@ fun IOSLockScreenView(
             modifier = modifier
                 .fillMaxSize()
                 .background(Color.Black)
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onLongPress = {
+                            if (!showPasscodePad) {
+                                IOSFeedbackHelper.vibrateMedium(context)
+                                viewModel.openLockScreenCustomize()
+                            }
+                        }
+                    )
+                }
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures { _, dragAmount ->
+                        if (dragAmount < -35f && !showPasscodePad) {
+                            performUnlock()
+                        }
+                    }
+                }
         ) {
-            // Wallpaper
-            if (!currentWallpaperUri.isNullOrBlank()) {
-                AsyncImage(
-                    model = currentWallpaperUri,
-                    contentDescription = "Lockscreen Wallpaper",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-            } else {
-                Image(
-                    painter = painterResource(id = if (currentWallpaperRes != 0) currentWallpaperRes else R.drawable.ios26_wallpaper),
-                    contentDescription = "Lockscreen Wallpaper",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
+            // LAYER 1 & 2: iOS 26 Depth Effect Wallpaper Renderer (Background + Clock Behind Foreground Subject)
+            IOSDepthWallpaperRenderer(
+                config = lockScreenConfig,
+                wallpaperRes = currentWallpaperRes,
+                wallpaperUri = currentWallpaperUri,
+                currentTime = currentTime,
+                currentDate = currentDateFormatted,
+                batteryLevel = batteryLevel,
+                isBatteryCharging = isBatteryCharging,
+                modifier = Modifier.fillMaxSize()
+            )
 
-            // Dim overlay when passcode keypad is active
+            // Dim overlay when entering passcode
             if (showPasscodePad) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.5f))
+                        .background(Color.Black.copy(alpha = 0.65f))
                 )
             }
 
+            // Foreground Overlays & Controls
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -136,12 +166,11 @@ fun IOSLockScreenView(
                     isDarkIcons = false
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
-                // Lock icon / Face ID icon
+                // Lock / Face ID Status Icon
                 Box(
-                    modifier = Modifier
-                        .size(36.dp),
+                    modifier = Modifier.size(34.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     if (isFaceIdScanning) {
@@ -155,58 +184,41 @@ fun IOSLockScreenView(
                             imageVector = if (showPasscodePad) Icons.Rounded.Lock else Icons.Rounded.LockOpen,
                             contentDescription = "Lock Status",
                             tint = Color.White,
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(22.dp)
                         )
                     }
                 }
 
                 if (!showPasscodePad) {
-                    // Date & Time
-                    Text(
-                        text = currentDateFormatted,
-                        color = Color.White.copy(alpha = 0.9f),
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Medium,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(top = 10.dp)
-                    )
-
-                    Text(
-                        text = currentTime,
-                        color = Color.White,
-                        fontSize = 76.sp,
-                        fontWeight = FontWeight.Light,
-                        letterSpacing = (-2).sp,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(vertical = 4.dp)
-                    )
-
+                    // Lock Screen Idle Mode: Spacer pushes unlock gesture & shortcuts to bottom
                     Spacer(modifier = Modifier.weight(1f))
 
-                    // Swipe Up / Tap to Unlock Prompt
+                    // Swipe Up / Tap to Unlock Prompt with HomeBar indicator
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier
-                            .clickable {
-                                if (isPasscodeEnabled) {
-                                    showPasscodePad = true
-                                } else {
-                                    viewModel.unlockDevice()
-                                }
-                            }
-                            .padding(bottom = 20.dp)
+                            .clickable { performUnlock() }
+                            .padding(bottom = 8.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.KeyboardArrowUp,
                             contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.8f),
-                            modifier = Modifier.size(28.dp)
+                            tint = Color.White.copy(alpha = 0.85f),
+                            modifier = Modifier.size(24.dp)
                         )
                         Text(
                             text = "Swipe up or tap to unlock",
-                            color = Color.White.copy(alpha = 0.85f),
+                            color = Color.White.copy(alpha = 0.9f),
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Normal
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Box(
+                            modifier = Modifier
+                                .width(135.dp)
+                                .height(5.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(Color.White.copy(alpha = 0.7f))
                         )
                     }
 
@@ -214,34 +226,71 @@ fun IOSLockScreenView(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 40.dp, vertical = 20.dp),
+                            .padding(horizontal = 46.dp, vertical = 18.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         val flashlightOn by viewModel.flashlightEnabled.collectAsState()
-                        val context = androidx.compose.ui.platform.LocalContext.current
                         Box(
                             modifier = Modifier
-                                .size(52.dp)
+                                .size(50.dp)
                                 .clip(CircleShape)
-                                .background(if (flashlightOn) Color.White else Color(0x55000000))
-                                .clickable { viewModel.toggleFlashlight(context) },
+                                .background(if (flashlightOn) Color.White else Color(0x66000000))
+                                .border(1.dp, Color.White.copy(alpha = 0.3f), CircleShape)
+                                .clickable {
+                                    IOSFeedbackHelper.vibrateMedium(context)
+                                    viewModel.toggleFlashlight(context)
+                                },
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.FlashlightOn,
                                 contentDescription = "Flashlight",
                                 tint = if (flashlightOn) Color.Black else Color.White,
-                                modifier = Modifier.size(24.dp)
+                                modifier = Modifier.size(22.dp)
                             )
+                        }
+
+                        // Customize Wallpaper hint button
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color.Black.copy(alpha = 0.45f))
+                                .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(16.dp))
+                                .clickable {
+                                    IOSFeedbackHelper.vibrateLight(context)
+                                    viewModel.openLockScreenCustomize()
+                                }
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.AutoAwesome,
+                                    contentDescription = null,
+                                    tint = Color.White.copy(alpha = 0.85f),
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text(
+                                    text = "Customize",
+                                    color = Color.White.copy(alpha = 0.85f),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
                         }
 
                         Box(
                             modifier = Modifier
-                                .size(52.dp)
+                                .size(50.dp)
                                 .clip(CircleShape)
-                                .background(Color(0x55000000))
+                                .background(Color(0x66000000))
+                                .border(1.dp, Color.White.copy(alpha = 0.3f), CircleShape)
                                 .clickable {
+                                    IOSFeedbackHelper.vibrateMedium(context)
                                     viewModel.unlockDevice()
                                     viewModel.openApp(AppId.CAMERA)
                                 },
@@ -251,24 +300,29 @@ fun IOSLockScreenView(
                                 imageVector = Icons.Rounded.CameraAlt,
                                 contentDescription = "Camera",
                                 tint = Color.White,
-                                modifier = Modifier.size(24.dp)
+                                modifier = Modifier.size(22.dp)
                             )
                         }
                     }
                 } else {
-                    // Passcode Pad View
+                    // AUTHENTIC iOS PASSCODE KEYPAD UI (Properly centered & scaled for thumb reach)
+                    Spacer(modifier = Modifier.weight(0.9f))
+
                     Text(
                         text = "Enter Passcode",
                         color = Color.White,
-                        fontSize = 19.sp,
+                        fontSize = 20.sp,
                         fontWeight = FontWeight.Medium,
-                        modifier = Modifier.padding(top = 20.dp, bottom = 24.dp)
+                        letterSpacing = 0.5.sp,
+                        modifier = Modifier.padding(bottom = 22.dp)
                     )
 
-                    // 4 Passcode Dots
+                    // 4 Passcode Dots with Spring Error Shake
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        modifier = Modifier.padding(bottom = 32.dp)
+                        horizontalArrangement = Arrangement.spacedBy(18.dp),
+                        modifier = Modifier
+                            .offset(x = shakeOffset.value.dp)
+                            .padding(bottom = 34.dp)
                     ) {
                         for (i in 0 until 4) {
                             val isFilled = i < enteredPasscode.length
@@ -279,22 +333,35 @@ fun IOSLockScreenView(
                                     .background(
                                         if (isPasscodeError) Color(0xFFFF3B30)
                                         else if (isFilled) Color.White
-                                        else Color.White.copy(alpha = 0.3f)
+                                        else Color.White.copy(alpha = 0.35f)
+                                    )
+                                    .border(
+                                        1.dp,
+                                        if (isFilled) Color.White else Color.White.copy(alpha = 0.55f),
+                                        CircleShape
                                     )
                             )
                         }
                     }
 
-                    // Keypad 3x4
+                    // Authentic iOS 3x4 Keypad
                     val padKeys = listOf(
-                        Pair("1", ""), Pair("2", "A B C"), Pair("3", "D E F"),
-                        Pair("4", "G H I"), Pair("5", "J K L"), Pair("6", "M N O"),
-                        Pair("7", "P Q R S"), Pair("8", "T U V"), Pair("9", "W X Y Z"),
-                        Pair("", ""), Pair("0", ""), Pair("delete", "")
+                        Triple("1", "", ""),
+                        Triple("2", "A B C", ""),
+                        Triple("3", "D E F", ""),
+                        Triple("4", "G H I", ""),
+                        Triple("5", "J K L", ""),
+                        Triple("6", "M N O", ""),
+                        Triple("7", "P Q R S", ""),
+                        Triple("8", "T U V", ""),
+                        Triple("9", "W X Y Z", ""),
+                        Triple("emergency", "", ""),
+                        Triple("0", "", ""),
+                        Triple("delete", "", "")
                     )
 
                     Column(
-                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         for (row in 0 until 4) {
@@ -303,68 +370,116 @@ fun IOSLockScreenView(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 for (col in 0 until 3) {
-                                    val key = padKeys[row * 3 + col]
-                                    if (key.first == "delete") {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(75.dp)
-                                                .clickable {
-                                                    if (enteredPasscode.isNotEmpty()) {
-                                                        enteredPasscode = enteredPasscode.dropLast(1)
-                                                    } else {
-                                                        showPasscodePad = false
-                                                    }
-                                                },
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                text = if (enteredPasscode.isEmpty()) "Cancel" else "Delete",
-                                                color = Color.White,
-                                                fontSize = 15.sp,
-                                                fontWeight = FontWeight.Normal
-                                            )
+                                    val (key, subtext, _) = padKeys[row * 3 + col]
+
+                                    when (key) {
+                                        "emergency" -> {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(80.dp)
+                                                    .clickable {
+                                                        IOSFeedbackHelper.vibrateMedium(context)
+                                                        viewModel.unlockDevice()
+                                                        viewModel.openApp(AppId.PHONE)
+                                                    },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = "Emergency",
+                                                    color = Color.White,
+                                                    fontSize = 15.sp,
+                                                    fontWeight = FontWeight.Normal
+                                                )
+                                            }
                                         }
-                                    } else if (key.first.isEmpty()) {
-                                        Box(modifier = Modifier.size(75.dp))
-                                    } else {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(75.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(0x33FFFFFF))
-                                                .clickable {
-                                                    if (enteredPasscode.length < 4) {
-                                                        enteredPasscode += key.first
-                                                        if (enteredPasscode.length == 4) {
-                                                            if (enteredPasscode == userPasscode) {
-                                                                viewModel.unlockDevice()
-                                                            } else {
-                                                                isPasscodeError = true
-                                                                coroutineScope.launch {
-                                                                    delay(600)
-                                                                    isPasscodeError = false
-                                                                    enteredPasscode = ""
+                                        "delete" -> {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(80.dp)
+                                                    .clickable {
+                                                        IOSFeedbackHelper.vibrateLight(context)
+                                                        IOSFeedbackHelper.playClickSound(context)
+                                                        if (enteredPasscode.isNotEmpty()) {
+                                                            enteredPasscode = enteredPasscode.dropLast(1)
+                                                        } else {
+                                                            showPasscodePad = false
+                                                        }
+                                                    },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = if (enteredPasscode.isEmpty()) "Cancel" else "Delete",
+                                                    color = Color.White,
+                                                    fontSize = 16.sp,
+                                                    fontWeight = FontWeight.Normal
+                                                )
+                                            }
+                                        }
+                                        else -> {
+                                            // Number Button: 80.dp circle, frosted glass background, large clean digit
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(80.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color(0x38FFFFFF))
+                                                    .border(1.dp, Color.White.copy(alpha = 0.20f), CircleShape)
+                                                    .clickable {
+                                                        IOSFeedbackHelper.vibrateLight(context)
+                                                        IOSFeedbackHelper.playClickSound(context)
+                                                        if (enteredPasscode.length < 4) {
+                                                            enteredPasscode += key
+                                                            if (enteredPasscode.length == 4) {
+                                                                if (enteredPasscode == userPasscode) {
+                                                                    IOSFeedbackHelper.vibrateSuccess(context)
+                                                                    IOSFeedbackHelper.playUnlockSound(context)
+                                                                    viewModel.unlockDevice()
+                                                                } else {
+                                                                    isPasscodeError = true
+                                                                    IOSFeedbackHelper.vibrateError(context)
+                                                                    coroutineScope.launch {
+                                                                        // Realistic iOS lock shake
+                                                                        shakeOffset.animateTo(
+                                                                            targetValue = 24f,
+                                                                            animationSpec = spring(dampingRatio = Spring.DampingRatioHighBouncy, stiffness = Spring.StiffnessHigh)
+                                                                        )
+                                                                        shakeOffset.animateTo(
+                                                                            targetValue = -24f,
+                                                                            animationSpec = spring(dampingRatio = Spring.DampingRatioHighBouncy, stiffness = Spring.StiffnessHigh)
+                                                                        )
+                                                                        shakeOffset.animateTo(
+                                                                            targetValue = 0f,
+                                                                            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)
+                                                                        )
+                                                                        delay(300)
+                                                                        isPasscodeError = false
+                                                                        enteredPasscode = ""
+                                                                    }
                                                                 }
                                                             }
                                                         }
-                                                    }
-                                                },
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                                Text(
-                                                    text = key.first,
-                                                    color = Color.White,
-                                                    fontSize = 32.sp,
-                                                    fontWeight = FontWeight.Light
-                                                )
-                                                if (key.second.isNotEmpty()) {
+                                                    },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Column(
+                                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                                    verticalArrangement = Arrangement.Center
+                                                ) {
                                                     Text(
-                                                        text = key.second,
-                                                        color = Color.White.copy(alpha = 0.8f),
-                                                        fontSize = 9.sp,
-                                                        fontWeight = FontWeight.SemiBold
+                                                        text = key,
+                                                        color = Color.White,
+                                                        fontSize = 36.sp,
+                                                        fontWeight = FontWeight.Light,
+                                                        lineHeight = 36.sp
                                                     )
+                                                    if (subtext.isNotEmpty()) {
+                                                        Text(
+                                                            text = subtext,
+                                                            color = Color.White.copy(alpha = 0.85f),
+                                                            fontSize = 10.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            letterSpacing = 1.8.sp
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
@@ -374,20 +489,17 @@ fun IOSLockScreenView(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(24.dp))
-                    Text(
-                        text = "Emergency",
-                        color = Color.White,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Normal,
-                        modifier = Modifier
-                            .clickable {
-                                viewModel.unlockDevice()
-                                viewModel.openApp(AppId.PHONE)
-                            }
-                            .padding(12.dp)
-                    )
+                    Spacer(modifier = Modifier.weight(1.1f))
                 }
+            }
+
+            // Lock Screen Customizer Sheet Modal
+            if (isCustomizeOpen) {
+                LockScreenCustomizerSheet(
+                    config = lockScreenConfig,
+                    onUpdateConfig = { viewModel.updateLockScreenConfig(it) },
+                    onClose = { viewModel.closeLockScreenCustomize() }
+                )
             }
         }
     }

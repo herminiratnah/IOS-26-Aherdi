@@ -49,6 +49,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
+import com.example.util.IOSFeedbackHelper
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -78,7 +81,9 @@ data class DynamicIslandData(
     val title: String = "",
     val subtitle: String = "",
     val icon: String = "",
-    val accentColor: Long = 0xFF34C759
+    val accentColor: Long = 0xFF34C759,
+    val packageName: String? = null,
+    val contentIntent: android.app.PendingIntent? = null
 )
 
 class IOSViewModel(application: Application) : AndroidViewModel(application) {
@@ -189,6 +194,25 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
     private val _isLockScreenCustomizeOpen = MutableStateFlow(false)
     val isLockScreenCustomizeOpen: StateFlow<Boolean> = _isLockScreenCustomizeOpen.asStateFlow()
 
+    // App Switcher Multitasking State
+    private val _recentApps = MutableStateFlow<List<AppId>>(
+        listOf(AppId.SAFARI, AppId.PHOTOS, AppId.CAMERA, AppId.SETTINGS, AppId.MESSAGES, AppId.MUSIC, AppId.CALCULATOR, AppId.NOTES)
+    )
+    val recentApps: StateFlow<List<AppId>> = _recentApps.asStateFlow()
+
+    private val _isAppSwitcherOpen = MutableStateFlow(false)
+    val isAppSwitcherOpen: StateFlow<Boolean> = _isAppSwitcherOpen.asStateFlow()
+
+    // Developer Options State
+    private val _isDeveloperModeEnabled = MutableStateFlow(false)
+    val isDeveloperModeEnabled: StateFlow<Boolean> = _isDeveloperModeEnabled.asStateFlow()
+
+    private val _isFpsCounterVisible = MutableStateFlow(false)
+    val isFpsCounterVisible: StateFlow<Boolean> = _isFpsCounterVisible.asStateFlow()
+
+    private val _animationScale = MutableStateFlow(1.0f)
+    val animationScale: StateFlow<Float> = _animationScale.asStateFlow()
+
     // Lockscreen Config
     private val _lockScreenConfig = MutableStateFlow(LockScreenConfig())
     val lockScreenConfig: StateFlow<LockScreenConfig> = _lockScreenConfig.asStateFlow()
@@ -231,13 +255,68 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
     private val _isSiriOpen = MutableStateFlow(false)
     val isSiriOpen: StateFlow<Boolean> = _isSiriOpen.asStateFlow()
 
-    // AssistiveTouch Virtual Button
-    private val _isAssistiveTouchEnabled = MutableStateFlow(true)
+    // AssistiveTouch Virtual Button (Default disabled per user request)
+    private val _isAssistiveTouchEnabled = MutableStateFlow(false)
     val isAssistiveTouchEnabled: StateFlow<Boolean> = _isAssistiveTouchEnabled.asStateFlow()
 
     // Spotlight Search
     private val _isSpotlightOpen = MutableStateFlow(false)
     val isSpotlightOpen: StateFlow<Boolean> = _isSpotlightOpen.asStateFlow()
+
+    // Custom App Icons (App ID name or package name -> File path / URI)
+    private val _customAppIcons = MutableStateFlow<Map<String, String>>(emptyMap())
+    val customAppIcons: StateFlow<Map<String, String>> = _customAppIcons.asStateFlow()
+
+    // Action Button Customization (iPhone 15/16/17 Pro)
+    private val _actionButtonFunction = MutableStateFlow("Flashlight")
+    val actionButtonFunction: StateFlow<String> = _actionButtonFunction.asStateFlow()
+
+    // Camera Control (iPhone 16/17 Pro)
+    private val _cameraControlEnabled = MutableStateFlow(true)
+    val cameraControlEnabled: StateFlow<Boolean> = _cameraControlEnabled.asStateFlow()
+    private val _cameraControlSensitivity = MutableStateFlow("Default")
+    val cameraControlSensitivity: StateFlow<String> = _cameraControlSensitivity.asStateFlow()
+
+    // StandBy Mode (iOS 17/18/26)
+    private val _standByEnabled = MutableStateFlow(true)
+    val standByEnabled: StateFlow<Boolean> = _standByEnabled.asStateFlow()
+    private val _standByNightMode = MutableStateFlow(true)
+    val standByNightMode: StateFlow<Boolean> = _standByNightMode.asStateFlow()
+    private val _standByAlwaysOn = MutableStateFlow(false)
+    val standByAlwaysOn: StateFlow<Boolean> = _standByAlwaysOn.asStateFlow()
+
+    // Focus & Do Not Disturb
+    private val _isDNDActive = MutableStateFlow(false)
+    val isDNDActive: StateFlow<Boolean> = _isDNDActive.asStateFlow()
+
+    // Focus Mode Pipeline
+    private val _currentFocusMode = MutableStateFlow(com.example.model.FocusMode.OFF)
+    val currentFocusMode: StateFlow<com.example.model.FocusMode> = _currentFocusMode.asStateFlow()
+
+    // StandBy Mode Overlay State
+    private val _isStandByOpen = MutableStateFlow(false)
+    val isStandByOpen: StateFlow<Boolean> = _isStandByOpen.asStateFlow()
+    fun openStandBy() { _isStandByOpen.value = true }
+    fun closeStandBy() { _isStandByOpen.value = false }
+
+    // Back Tap Pipeline (Accessibility)
+    private val _backTapEnabled = MutableStateFlow(true)
+    val backTapEnabled: StateFlow<Boolean> = _backTapEnabled.asStateFlow()
+    private val _backTapDoubleAction = MutableStateFlow(com.example.model.BackTapAction.FLASHLIGHT)
+    val backTapDoubleAction: StateFlow<com.example.model.BackTapAction> = _backTapDoubleAction.asStateFlow()
+    private val _backTapTripleAction = MutableStateFlow(com.example.model.BackTapAction.SCREENSHOT)
+    val backTapTripleAction: StateFlow<com.example.model.BackTapAction> = _backTapTripleAction.asStateFlow()
+
+    // AirDrop / Share Sheet Pipeline
+    private val _isShareSheetOpen = MutableStateFlow(false)
+    val isShareSheetOpen: StateFlow<Boolean> = _isShareSheetOpen.asStateFlow()
+    private val _shareSheetTitle = MutableStateFlow("Item")
+    val shareSheetTitle: StateFlow<String> = _shareSheetTitle.asStateFlow()
+    fun openShareSheet(title: String = "Item") {
+        _shareSheetTitle.value = title
+        _isShareSheetOpen.value = true
+    }
+    fun closeShareSheet() { _isShareSheetOpen.value = false }
 
     fun openSiri() { _isSiriOpen.value = true }
     fun closeSiri() { _isSiriOpen.value = false }
@@ -250,10 +329,10 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
     fun setAssistiveTouchEnabled(enabled: Boolean) { _isAssistiveTouchEnabled.value = enabled }
 
     // Wallpaper Management
-    private val _currentWallpaperRes = MutableStateFlow(com.example.R.drawable.ios26_wallpaper)
+    private val _currentWallpaperRes = MutableStateFlow(com.example.R.drawable.wallpaper_mountain_depth)
     val currentWallpaperRes: StateFlow<Int> = _currentWallpaperRes.asStateFlow()
 
-    private val _currentWallpaperName = MutableStateFlow("iOS 26 Ambient")
+    private val _currentWallpaperName = MutableStateFlow("Alpine Mountain Peak")
     val currentWallpaperName: StateFlow<String> = _currentWallpaperName.asStateFlow()
 
     private val _currentWallpaperUri = MutableStateFlow<String?>(null)
@@ -578,11 +657,35 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
     private val _isImmersiveLocked = MutableStateFlow(false)
     val isImmersiveLocked: StateFlow<Boolean> = _isImmersiveLocked.asStateFlow()
 
+    private val _isSystemUIDisabled = MutableStateFlow(false)
+    val isSystemUIDisabled: StateFlow<Boolean> = _isSystemUIDisabled.asStateFlow()
+
+    private val _isNotificationListenerGranted = MutableStateFlow(false)
+    val isNotificationListenerGranted: StateFlow<Boolean> = _isNotificationListenerGranted.asStateFlow()
+
     private val _cpuBoostEnabled = MutableStateFlow(false)
     val cpuBoostEnabled: StateFlow<Boolean> = _cpuBoostEnabled.asStateFlow()
 
+    private val _is120HzUnlocked = MutableStateFlow(false)
+    val is120HzUnlocked: StateFlow<Boolean> = _is120HzUnlocked.asStateFlow()
+
+    private val _isThermalDisabled = MutableStateFlow(false)
+    val isThermalDisabled: StateFlow<Boolean> = _isThermalDisabled.asStateFlow()
+
+    private val _isSELinuxPermissive = MutableStateFlow(false)
+    val isSELinuxPermissive: StateFlow<Boolean> = _isSELinuxPermissive.asStateFlow()
+
+    private val _retinaDpi = MutableStateFlow(240)
+    val retinaDpi: StateFlow<Int> = _retinaDpi.asStateFlow()
+
     private val _spoofedModel = MutableStateFlow("iPhone SE (2nd gen) / iOS 26")
     val spoofedModel: StateFlow<String> = _spoofedModel.asStateFlow()
+
+    private val _isTopDisplayInsetActive = MutableStateFlow(false)
+    val isTopDisplayInsetActive: StateFlow<Boolean> = _isTopDisplayInsetActive.asStateFlow()
+
+    private val _weatherData = MutableStateFlow(WeatherData())
+    val weatherData: StateFlow<WeatherData> = _weatherData.asStateFlow()
 
     init {
         // Load persistent data for Calendar, Alarms, Reminders, Notes, Wallpaper & Bluetooth
@@ -596,7 +699,39 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
             _currentWallpaperRes.value = savedRes
             _currentWallpaperName.value = savedName
             _currentWallpaperUri.value = savedUri
+            val (savedDepth, savedTheme) = IOSPersistenceManager.loadDepthConfig(app)
+            _lockScreenConfig.value = _lockScreenConfig.value.copy(
+                depthEffectEnabled = savedDepth,
+                depthTheme = savedTheme
+            )
             initBluetoothState(app)
+
+            // Load iRoot persistent states
+            _isImmersiveLocked.value = IOSPersistenceManager.loadRootBoolean(app, "immersive", false)
+            _isSystemUIDisabled.value = IOSPersistenceManager.loadRootBoolean(app, "systemui_disabled", false)
+            _isNotificationListenerGranted.value = IOSPersistenceManager.loadRootBoolean(app, "notif_granted", false)
+            _cpuBoostEnabled.value = IOSPersistenceManager.loadRootBoolean(app, "cpu_boost", false)
+            _is120HzUnlocked.value = IOSPersistenceManager.loadRootBoolean(app, "120hz", false)
+            _isThermalDisabled.value = IOSPersistenceManager.loadRootBoolean(app, "thermal_disabled", false)
+            _isSELinuxPermissive.value = IOSPersistenceManager.loadRootBoolean(app, "selinux_permissive", false)
+            _retinaDpi.value = IOSPersistenceManager.loadRootInt(app, "retina_dpi", 240)
+            _spoofedModel.value = IOSPersistenceManager.loadRootString(app, "spoofed_model", "iPhone SE (2nd gen) / iOS 26")
+            _isTopDisplayInsetActive.value = IOSPersistenceManager.loadRootBoolean(app, "top_inset", false)
+
+            // Auto-fetch real-time weather for Bandung
+            fetchLiveWeather("Bandung")
+
+            // Load Custom Icons & iOS 26 Settings
+            _customAppIcons.value = IOSPersistenceManager.loadCustomIcons(app)
+            _actionButtonFunction.value = IOSPersistenceManager.loadActionButton(app)
+            _cameraControlEnabled.value = IOSPersistenceManager.loadCameraControlEnabled(app)
+            _standByEnabled.value = IOSPersistenceManager.loadStandByEnabled(app)
+            _currentFocusMode.value = IOSPersistenceManager.loadFocusMode(app)
+            OverlayBridge.currentFocusMode.value = _currentFocusMode.value
+            _isDNDActive.value = (_currentFocusMode.value != com.example.model.FocusMode.OFF)
+            _backTapEnabled.value = IOSPersistenceManager.loadBackTapEnabled(app)
+            _backTapDoubleAction.value = IOSPersistenceManager.loadBackTapDoubleAction(app)
+            _backTapTripleAction.value = IOSPersistenceManager.loadBackTapTripleAction(app)
 
             // Setup OverlayBridge callbacks for cross-app control
             OverlayBridge.onTogglePlayPause = { toggleMusicPlay() }
@@ -605,6 +740,14 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
             OverlayBridge.onEndCall = { endCall(null) }
             OverlayBridge.onToggleMute = { toggleMuteCall() }
             OverlayBridge.onToggleSpeaker = { toggleSpeakerCall() }
+            OverlayBridge.onDismissDynamicIsland = { dismissDynamicIsland() }
+
+            // Mirror Dynamic Island state changes across all apps
+            viewModelScope.launch {
+                _dynamicIsland.collect { islandState ->
+                    OverlayBridge.dynamicIslandData.value = islandState
+                }
+            }
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -679,13 +822,6 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
             current.add(photoId)
         }
         _selectedWidgetPhotoIds.value = current
-        val isNowSelected = current.contains(photoId)
-        showDynamicIslandNotification(
-            "Photos Widget",
-            if (isNowSelected) "Foto ditambahkan ke slideshow widget" else "Foto dihapus dari slideshow widget",
-            "photo",
-            0xFFFF9500
-        )
     }
 
     fun setWidgetPhotoIndex(index: Int) {
@@ -716,7 +852,6 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
     // App Setting Controls
     fun setAppSetting(key: String, value: Any) {
         _appSettingsState.value = _appSettingsState.value + (key to value)
-        showDynamicIslandNotification("Settings", "Pengaturan disimpan", "shield", 0xFF007AFF)
     }
 
     fun getAppSetting(key: String, default: Any): Any {
@@ -738,6 +873,55 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
         _isControlCenterOpen.value = false
         _isNotificationCenterOpen.value = false
         _isLockScreenCustomizeOpen.value = false
+        _isAppSwitcherOpen.value = false
+
+        // Update recent apps stack
+        val list = _recentApps.value.toMutableList()
+        list.remove(appId)
+        list.add(0, appId)
+        if (list.size > 12) {
+            _recentApps.value = list.take(12)
+        } else {
+            _recentApps.value = list
+        }
+    }
+
+    fun openAppSwitcher() {
+        _isAppSwitcherOpen.value = true
+        _isControlCenterOpen.value = false
+        _isNotificationCenterOpen.value = false
+        _isLockScreenCustomizeOpen.value = false
+    }
+
+    fun closeAppSwitcher() {
+        _isAppSwitcherOpen.value = false
+    }
+
+    fun dismissRecentApp(appId: AppId) {
+        val list = _recentApps.value.toMutableList()
+        list.remove(appId)
+        _recentApps.value = list
+        if (_currentApp.value == appId) {
+            _currentApp.value = null
+        }
+    }
+
+    fun clearAllRecentApps() {
+        _recentApps.value = emptyList()
+        _currentApp.value = null
+        _isAppSwitcherOpen.value = false
+    }
+
+    fun toggleDeveloperMode(enabled: Boolean) {
+        _isDeveloperModeEnabled.value = enabled
+    }
+
+    fun toggleFpsCounter(enabled: Boolean) {
+        _isFpsCounterVisible.value = enabled
+    }
+
+    fun setAnimationScale(scale: Float) {
+        _animationScale.value = scale
     }
 
     fun closeApp() {
@@ -776,21 +960,35 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun updateLockScreenConfig(update: (LockScreenConfig) -> LockScreenConfig) {
-        _lockScreenConfig.value = update(_lockScreenConfig.value)
+        val updated = update(_lockScreenConfig.value)
+        _lockScreenConfig.value = updated
+        try {
+            val app = getApplication<Application>()
+            IOSPersistenceManager.saveDepthConfig(app, updated.depthEffectEnabled, updated.depthTheme)
+        } catch (ignored: Exception) {}
     }
 
     // Dynamic Island Toast & Alerts
-    fun showDynamicIslandNotification(title: String, message: String, icon: String = "bell", accent: Long = 0xFF34C759) {
+    fun showDynamicIslandNotification(
+        title: String,
+        message: String,
+        icon: String = "bell",
+        accent: Long = 0xFF34C759,
+        packageName: String? = null,
+        contentIntent: android.app.PendingIntent? = null
+    ) {
         dynamicIslandJob?.cancel()
         _dynamicIsland.value = DynamicIslandData(
             mode = DynamicIslandMode.NOTIFICATION,
             title = title,
             subtitle = message,
             icon = icon,
-            accentColor = accent
+            accentColor = accent,
+            packageName = packageName,
+            contentIntent = contentIntent
         )
         dynamicIslandJob = viewModelScope.launch {
-            delay(4000)
+            delay(4500)
             if (_dynamicIsland.value.mode == DynamicIslandMode.NOTIFICATION) {
                 _dynamicIsland.value = DynamicIslandData(mode = DynamicIslandMode.COMPACT)
             }
@@ -900,6 +1098,7 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
         _callRecords.value = listOf(newRecord) + _callRecords.value
     }
 
+    @SuppressLint("MissingPermission")
     fun endCall(context: Context? = null) {
         _isInCall.value = false
         OverlayBridge.isInCall.value = false
@@ -908,7 +1107,9 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
         try {
             val telecom = ctx.getSystemService(Context.TELECOM_SERVICE) as? TelecomManager
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                telecom?.endCall()
+                if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.ANSWER_PHONE_CALLS) == PackageManager.PERMISSION_GRANTED) {
+                    telecom?.endCall()
+                }
             }
         } catch (ignored: Exception) {}
         RootExecutor.execute("input keyevent KEYCODE_ENDCALL")
@@ -1300,12 +1501,10 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
             _wifiEnabled.value = false
             _isWifiConnected.value = false
             _cellularSignalBars.value = 0
-            showDynamicIslandNotification("Airplane Mode", "Mode Pesawat Aktif", "airplane", 0xFFFF9500)
         } else {
             _wifiEnabled.value = true
             _isWifiConnected.value = true
             _cellularSignalBars.value = 4
-            showDynamicIslandNotification("Airplane Mode", "Mode Pesawat Nonaktif", "airplane", 0xFFFF9500)
         }
 
         // Apply via root to actual system settings if root access is present
@@ -1326,10 +1525,17 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toggleWifi() {
-        _wifiEnabled.value = !_wifiEnabled.value
-        _isWifiConnected.value = _wifiEnabled.value
-        val state = if (_wifiEnabled.value) "Tersambung ke ${_currentWifiSsid.value}" else "Wi-Fi Dimatikan"
-        showDynamicIslandNotification("Wi-Fi", state, "wifi", 0xFF007AFF)
+        val newState = !_wifiEnabled.value
+        _wifiEnabled.value = newState
+        _isWifiConnected.value = newState
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val wm = getApplication<Application>().applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+                @Suppress("DEPRECATION")
+                wm?.isWifiEnabled = newState
+            } catch (ignored: Exception) {}
+            RootExecutor.execute(if (newState) "svc wifi enable" else "svc wifi disable")
+        }
     }
 
     fun setWifiEnabled(enabled: Boolean) {
@@ -1488,6 +1694,7 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    @SuppressLint("MissingPermission")
     fun connectBluetoothDevice(context: Context? = null, deviceName: String) {
         val ctx = context ?: getApplication<Application>()
         viewModelScope.launch {
@@ -1527,6 +1734,7 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
         setBluetoothEnabled(!_bluetoothEnabled.value, context)
     }
 
+    @SuppressLint("MissingPermission")
     fun setBluetoothEnabled(enabled: Boolean, context: Context? = null) {
         _bluetoothEnabled.value = enabled
         viewModelScope.launch(Dispatchers.IO) {
@@ -1552,50 +1760,92 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
             } catch (ignored: Exception) {}
         }
         val state = if (enabled) "Bluetooth Aktif" else "Bluetooth Nonaktif"
-        showDynamicIslandNotification("Bluetooth", state, "bluetooth", 0xFF007AFF)
     }
 
     fun toggleCellular() {
-        _cellularEnabled.value = !_cellularEnabled.value
-        val state = if (_cellularEnabled.value) "Data Seluler Aktif" else "Data Seluler Nonaktif"
-        showDynamicIslandNotification("Cellular", state, "cellular", 0xFF34C759)
+        val newState = !_cellularEnabled.value
+        _cellularEnabled.value = newState
+        viewModelScope.launch(Dispatchers.IO) {
+            val cmd = if (newState) "svc data enable" else "svc data disable"
+            RootExecutor.execute(cmd)
+        }
     }
 
     fun setCellularEnabled(enabled: Boolean) {
-        _cellularEnabled.value = enabled
+        if (_cellularEnabled.value != enabled) {
+            toggleCellular()
+        }
     }
 
     fun toggleHotspot() {
-        _hotspotEnabled.value = !_hotspotEnabled.value
-        val state = if (_hotspotEnabled.value) "Hotspot Aktif" else "Hotspot Nonaktif"
-        showDynamicIslandNotification("Personal Hotspot", state, "hotspot", 0xFF34C759)
+        val newState = !_hotspotEnabled.value
+        _hotspotEnabled.value = newState
+        viewModelScope.launch(Dispatchers.IO) {
+            val cmd = if (newState) {
+                "svc wifi disable && wifi ap enable || cmd connectivity start-tethering 0"
+            } else {
+                "wifi ap disable || cmd connectivity stop-tethering 0"
+            }
+            RootExecutor.execute(cmd)
+        }
     }
 
     fun setHotspotEnabled(enabled: Boolean) {
-        _hotspotEnabled.value = enabled
+        if (_hotspotEnabled.value != enabled) {
+            toggleHotspot()
+        }
     }
 
     fun toggleFlashlight(context: Context) {
         FlashlightHelper.toggleTorch(context) { active ->
             _flashlightEnabled.value = active
-            if (active) {
-                showDynamicIslandNotification("Flashlight", "Senter Aktif", "flashlight", 0xFFFFCC00)
-            }
         }
     }
 
-    fun setBrightness(value: Float) {
-        _brightness.value = value.coerceIn(0.1f, 1.0f)
+    fun syncCurrentVolume(value: Float) {
+        _volume.value = value.coerceIn(0.0f, 1.0f)
     }
 
-    fun setVolume(value: Float) {
-        _volume.value = value.coerceIn(0.0f, 1.0f)
+    fun syncCurrentBrightness(value: Float) {
+        _brightness.value = value.coerceIn(0.02f, 1.0f)
+    }
+
+    fun setBrightness(value: Float, context: Context? = null) {
+        val clamped = value.coerceIn(0.02f, 1.0f)
+        _brightness.value = clamped
+        val ctx = context ?: getApplication<Application>()
+        viewModelScope.launch(Dispatchers.IO) {
+            val intVal = (clamped * 255).toInt().coerceIn(5, 255)
+            try {
+                Settings.System.putInt(ctx.contentResolver, Settings.System.SCREEN_BRIGHTNESS, intVal)
+            } catch (ignored: Exception) {}
+            try {
+                RootExecutor.execute("settings put system screen_brightness $intVal")
+            } catch (ignored: Exception) {}
+        }
+    }
+
+    fun setVolume(value: Float, context: Context? = null) {
+        val clamped = value.coerceIn(0.0f, 1.0f)
+        _volume.value = clamped
+        val ctx = context ?: getApplication<Application>()
+        try {
+            val am = ctx.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            if (am != null) {
+                val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                val target = (clamped * maxVol).toInt().coerceIn(0, maxVol)
+                am.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        val pct = (clamped * 100).toInt()
+        showDynamicIslandVolume(pct)
     }
 
     // Appearance & Dark Mode
     fun setDarkMode(dark: Boolean) {
         _isDarkMode.value = dark
-        showDynamicIslandNotification("Appearance", if (dark) "Dark Mode Aktif" else "Light Mode Aktif", "sun", 0xFF007AFF)
     }
 
     // Wallpaper Management
@@ -1959,6 +2209,56 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // ROOT COMMAND ACTIONS (Powerful J2 Prime Root Suite)
+    fun syncRootStates(context: Context? = null) {
+        val ctx = context ?: getApplication<Application>()
+        _isImmersiveLocked.value = IOSPersistenceManager.loadRootBoolean(ctx, "immersive", false)
+        _isSystemUIDisabled.value = IOSPersistenceManager.loadRootBoolean(ctx, "systemui_disabled", false)
+        _isNotificationListenerGranted.value = IOSPersistenceManager.loadRootBoolean(ctx, "notif_granted", false)
+        _cpuBoostEnabled.value = IOSPersistenceManager.loadRootBoolean(ctx, "cpu_boost", false)
+        _is120HzUnlocked.value = IOSPersistenceManager.loadRootBoolean(ctx, "120hz", false)
+        _isThermalDisabled.value = IOSPersistenceManager.loadRootBoolean(ctx, "thermal_disabled", false)
+        _isSELinuxPermissive.value = IOSPersistenceManager.loadRootBoolean(ctx, "selinux_permissive", false)
+        _isTopDisplayInsetActive.value = IOSPersistenceManager.loadRootBoolean(ctx, "top_inset", false)
+    }
+
+    fun fetchLiveWeather(city: String = "Bandung") {
+        viewModelScope.launch {
+            try {
+                val result = WeatherService.fetchWeather(latitude = -6.9175, longitude = 107.6191, cityName = city)
+                _weatherData.value = result
+            } catch (ignored: Exception) {}
+        }
+    }
+
+    fun toggleTopDisplayInsetRoot(context: Context? = null) {
+        viewModelScope.launch {
+            val newState = !_isTopDisplayInsetActive.value
+            _isTopDisplayInsetActive.value = newState
+            val ctx = context ?: getApplication<Application>()
+            IOSPersistenceManager.saveRootBoolean(ctx, "top_inset", newState)
+
+            // Pastikan launcher iOS kita selalu 100% fullscreen (0,0,0,0) di Y=0
+            // agar status bar dan dynamic island TIDAK PERNAH turun atau memendek!
+            // Inset hanya diterapkan secara dinamis saat user membuka aplikasi luar (WA/IG).
+            val result = RootExecutor.setTopDisplayInset(0)
+
+            val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+            val log = RootCommandLog(
+                time,
+                if (newState) "Ruang Mandiri Status Bar: AKTIF (Y=0 Terkunci)" else "Ruang Mandiri Status Bar: NONAKTIF",
+                if (newState) "Status bar kokoh di Y=0, bilah navigasi bawah disembunyikan" else "Batas layar dinormalkan",
+                result.first
+            )
+            _rootLogs.value = _rootLogs.value + log
+            showDynamicIslandNotification(
+                "Ruang Mandiri Status Bar",
+                if (newState) "Status Bar & Dynamic Island kokoh di ujung atas layar!" else "Pengaturan dinormalkan",
+                "display",
+                0xFF34C759
+            )
+        }
+    }
+
     fun runRootCommand(cmd: String) {
         viewModelScope.launch {
             val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
@@ -1969,26 +2269,102 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun toggleImmersiveRoot() {
+    fun toggleImmersiveRoot(context: Context? = null) {
         viewModelScope.launch {
             val newState = !_isImmersiveLocked.value
             val result = if (newState) RootExecutor.killAndroidBars() else RootExecutor.restoreAndroidBars()
             _isImmersiveLocked.value = newState
+            val ctx = context ?: getApplication<Application>()
+            IOSPersistenceManager.saveRootBoolean(ctx, "immersive", newState)
             val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-            val log = RootCommandLog(time, if (newState) "settings put global policy_control immersive.full=*" else "restore bars", result.second, result.first)
+            val log = RootCommandLog(time, if (newState) "icon_blacklist + immersive.nav" else "restore bars", result.second, result.first)
             _rootLogs.value = _rootLogs.value + log
-            showDynamicIslandNotification("Superuser", if (newState) "Status & Nav Bar Android dihilangkan!" else "Status bar dikembalikan", "shield", 0xFF007AFF)
+            showDynamicIslandNotification("Superuser", if (newState) "Ikon Android disembunyikan (Dialog USB Tetap Aktif)" else "Status bar dikembalikan", "shield", 0xFF007AFF)
+        }
+    }
+
+    fun toggleSystemUIDisabledRoot(context: Context? = null) {
+        viewModelScope.launch {
+            val newState = !_isSystemUIDisabled.value
+            val result = if (newState) RootExecutor.disableSystemUICompletely() else RootExecutor.restoreAndroidBars()
+            _isSystemUIDisabled.value = newState
+            val ctx = context ?: getApplication<Application>()
+            IOSPersistenceManager.saveRootBoolean(ctx, "systemui_disabled", newState)
+            val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+            val log = RootCommandLog(time, if (newState) "pm disable com.android.systemui" else "pm enable com.android.systemui", result.second, result.first)
+            _rootLogs.value = _rootLogs.value + log
+            showDynamicIslandNotification("SystemUI Magisk", if (newState) "SystemUI dinonaktifkan (Perlu Restart UI)" else "SystemUI diaktifkan kembali", "shield", 0xFF34C759)
         }
     }
 
     fun boostCpuRoot() {
         viewModelScope.launch {
-            val result = RootExecutor.boostCpuGovernor()
+            RootExecutor.boostCpuGovernor()
             _cpuBoostEnabled.value = true
             val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-            val log = RootCommandLog(time, "echo performance > cpu/scaling_governor", result.second, result.first)
+            val log = RootCommandLog(time, "echo performance > cpu/scaling_governor", "CPU Governor set to performance", true)
             _rootLogs.value = _rootLogs.value + log
-            showDynamicIslandNotification("CPU Governor", "J2 Prime CPU Boost Aktif (Performance)", "speed", 0xFFFF9500)
+            showDynamicIslandNotification("CPU Governor", "CPU Boost AKTIF (Performance Mode)", "speed", 0xFFFF9500)
+        }
+    }
+
+    fun toggleCpuBoostRoot(context: Context? = null) {
+        viewModelScope.launch {
+            val newState = !_cpuBoostEnabled.value
+            val result = if (newState) {
+                RootExecutor.boostCpuGovernor()
+            } else {
+                RootExecutor.executeCommand("for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo interactive > \"\$g\"; done")
+            }
+            _cpuBoostEnabled.value = newState
+            val ctx = context ?: getApplication<Application>()
+            IOSPersistenceManager.saveRootBoolean(ctx, "cpu_boost", newState)
+            val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+            val log = RootCommandLog(time, "echo ${if (newState) "performance" else "interactive"} > cpu/scaling_governor", result.second, result.first)
+            _rootLogs.value = _rootLogs.value + log
+            showDynamicIslandNotification("CPU Governor", if (newState) "CPU Boost AKTIF (Performance Mode)" else "CPU Mode Normal (Interactive)", "speed", 0xFFFF9500)
+        }
+    }
+
+    fun toggle120HzRoot(context: Context? = null) {
+        viewModelScope.launch {
+            val newState = !_is120HzUnlocked.value
+            val result = RootExecutor.setHighRefreshRate(newState)
+            _is120HzUnlocked.value = newState
+            val ctx = context ?: getApplication<Application>()
+            IOSPersistenceManager.saveRootBoolean(ctx, "120hz", newState)
+            val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+            val log = RootCommandLog(time, "peak_refresh_rate ${if (newState) "120.0" else "60.0"}", result.second, result.first)
+            _rootLogs.value = _rootLogs.value + log
+            showDynamicIslandNotification("Refresh Rate", if (newState) "120Hz ProMotion Aktif (Instan)" else "Refresh Rate 60Hz Standar", "display", 0xFF34C759)
+        }
+    }
+
+    fun toggleThermalThrottlingRoot(context: Context? = null) {
+        viewModelScope.launch {
+            val newState = !_isThermalDisabled.value
+            val result = RootExecutor.setThermalThrottling(newState)
+            _isThermalDisabled.value = newState
+            val ctx = context ?: getApplication<Application>()
+            IOSPersistenceManager.saveRootBoolean(ctx, "thermal_disabled", newState)
+            val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+            val log = RootCommandLog(time, if (newState) "stop thermal-engine" else "start thermal-engine", result.second, result.first)
+            _rootLogs.value = _rootLogs.value + log
+            showDynamicIslandNotification("Thermal Engine", if (newState) "Thermal Throttling Dimatikan (Full FPS)" else "Thermal Protection Aktif", "flame", 0xFFFF3B30)
+        }
+    }
+
+    fun toggleSELinuxRoot(context: Context? = null) {
+        viewModelScope.launch {
+            val newState = !_isSELinuxPermissive.value
+            val result = RootExecutor.setSELinuxPermissive(newState)
+            _isSELinuxPermissive.value = newState
+            val ctx = context ?: getApplication<Application>()
+            IOSPersistenceManager.saveRootBoolean(ctx, "selinux_permissive", newState)
+            val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+            val log = RootCommandLog(time, "setenforce ${if (newState) 0 else 1}", result.second, result.first)
+            _rootLogs.value = _rootLogs.value + log
+            showDynamicIslandNotification("SELinux Mode", if (newState) "SELinux: Permissive Mode" else "SELinux: Enforcing Mode", "shield", 0xFFFF9500)
         }
     }
 
@@ -2002,24 +2378,45 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun spoofDeviceRoot(modelName: String) {
+    fun spoofDeviceRoot(modelName: String, context: Context? = null) {
         viewModelScope.launch {
             val result = RootExecutor.spoofIphoneModel(modelName)
             _spoofedModel.value = modelName
+            val ctx = context ?: getApplication<Application>()
+            IOSPersistenceManager.saveRootString(ctx, "spoofed_model", modelName)
             val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
             val log = RootCommandLog(time, "setprop ro.product.model \"$modelName\"", result.second, result.first)
             _rootLogs.value = _rootLogs.value + log
-            showDynamicIslandNotification("Device Spoof", "Disamarkan jadi $modelName", "apple", 0xFF5856D6)
+            showDynamicIslandNotification("Device Spoof", "Disamarkan jadi $modelName (Perlu Restart)", "apple", 0xFF5856D6)
         }
     }
 
-    fun setRetinaDpiRoot(dpi: Int) {
+    fun setRetinaDpiRoot(dpi: Int, context: Context? = null) {
         viewModelScope.launch {
-            val result = RootExecutor.setIosRetinaDpi(dpi)
+            val result = if (dpi == 240) RootExecutor.resetDpi() else RootExecutor.setIosRetinaDpi(dpi)
+            _retinaDpi.value = dpi
+            val ctx = context ?: getApplication<Application>()
+            IOSPersistenceManager.saveRootInt(ctx, "retina_dpi", dpi)
             val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
             val log = RootCommandLog(time, "wm density $dpi", result.second, result.first)
             _rootLogs.value = _rootLogs.value + log
-            showDynamicIslandNotification("DPI Scaling", "Layar diatur ke $dpi DPI (Retina Mode)", "display", 0xFF32ADE6)
+            showDynamicIslandNotification("DPI Scaling", "Layar diatur ke $dpi DPI (Perlu Restart UI)", "display", 0xFF32ADE6)
+        }
+    }
+
+    fun softRestartSystemUI() {
+        viewModelScope.launch {
+            val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+            val result = RootExecutor.restartSystemUI()
+            val log = RootCommandLog(time, "pkill -9 -f com.android.systemui", result.second, result.first)
+            _rootLogs.value = _rootLogs.value + log
+            showDynamicIslandNotification("Soft Reboot", "SystemUI direstart...", "refresh", 0xFF007AFF)
+        }
+    }
+
+    fun powerOffRoot() {
+        viewModelScope.launch {
+            RootExecutor.powerOffDevice()
         }
     }
 
@@ -2214,11 +2611,9 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
                 if (launchIntent != null) {
                     launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     context.startActivity(launchIntent)
-                } else {
-                    showDynamicIslandNotification("App Library", "Membuka ${app.appName}...", "apple", 0xFF007AFF)
                 }
             } catch (e: Exception) {
-                showDynamicIslandNotification("Error", "Gagal membuka ${app.appName}", "bell", 0xFFFF3B30)
+                e.printStackTrace()
             }
         }
     }
@@ -2649,5 +3044,210 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
             }
         } catch (e: Exception) {}
         dismissDynamicIsland()
+    }
+
+    // ================= CUSTOM APP ICONS MANAGEMENT =================
+    fun setCustomAppIcon(key: String, uriString: String, context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val uri = Uri.parse(uriString)
+                val inputStream = context.contentResolver.openInputStream(uri)
+                val originalBitmap = android.graphics.BitmapFactory.decodeStream(inputStream)
+                inputStream?.close()
+
+                if (originalBitmap != null) {
+                    // Scale down to max 256x256 to save memory and optimize launcher performance on J2 Prime
+                    val maxDim = 256
+                    val width = originalBitmap.width
+                    val height = originalBitmap.height
+                    val scaledBitmap = if (width > maxDim || height > maxDim) {
+                        val ratio = width.toFloat() / height.toFloat()
+                        val targetW = if (ratio > 1f) maxDim else (maxDim * ratio).toInt()
+                        val targetH = if (ratio > 1f) (maxDim / ratio).toInt() else maxDim
+                        android.graphics.Bitmap.createScaledBitmap(originalBitmap, targetW, targetH, true)
+                    } else {
+                        originalBitmap
+                    }
+
+                    val dir = File(context.filesDir, "custom_icons").apply { if (!exists()) mkdirs() }
+                    val destFile = File(dir, "icon_${key}.png")
+                    val out = FileOutputStream(destFile)
+                    scaledBitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 90, out)
+                    out.flush()
+                    out.close()
+
+                    val filePath = destFile.absolutePath
+                    IOSPersistenceManager.saveCustomIcon(context, key, filePath)
+                    _customAppIcons.value = _customAppIcons.value + (key to filePath)
+
+                    withContext(Dispatchers.Main) {
+                        showDynamicIslandNotification("Ikon Diperbarui", "Ikon kustom diterapkan!", "apple", 0xFF007AFF)
+                        IOSFeedbackHelper.vibrateSuccess(context)
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                withContext(Dispatchers.Main) {
+                    showDynamicIslandNotification("Gagal Ganti Ikon", "Tidak dapat memuat gambar", "bell", 0xFFFF3B30)
+                }
+            }
+        }
+    }
+
+    fun resetCustomAppIcon(key: String, context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                IOSPersistenceManager.removeCustomIcon(context, key)
+                val file = File(context.filesDir, "custom_icons/icon_${key}.png")
+                if (file.exists()) file.delete()
+                _customAppIcons.value = _customAppIcons.value - key
+                withContext(Dispatchers.Main) {
+                    showDynamicIslandNotification("Ikon Direset", "Ikon asli dikembalikan", "arrow.clockwise", 0xFF34C759)
+                    IOSFeedbackHelper.vibrateLight(context)
+                }
+            } catch (e: Exception) {}
+        }
+    }
+
+    // ================= IPHONE 16/17 & IOS 26 ACTION BUTTON & SETTINGS =================
+    fun setActionButtonFunction(func: String, context: Context) {
+        _actionButtonFunction.value = func
+        IOSPersistenceManager.saveActionButton(context, func)
+        showDynamicIslandNotification("Action Button", func, "gear", 0xFF007AFF)
+        IOSFeedbackHelper.vibrateLight(context)
+    }
+
+    fun triggerActionButton(context: Context) {
+        IOSFeedbackHelper.vibrateMedium(context)
+        when (_actionButtonFunction.value) {
+            "Flashlight" -> {
+                toggleFlashlight(context)
+            }
+            "Camera" -> openApp(AppId.CAMERA)
+            "Silent Mode" -> {
+                val audio = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                if (audio != null) {
+                    val currentMode = audio.ringerMode
+                    if (currentMode == AudioManager.RINGER_MODE_SILENT || currentMode == AudioManager.RINGER_MODE_VIBRATE) {
+                        audio.ringerMode = AudioManager.RINGER_MODE_NORMAL
+                        showDynamicIslandNotification("Ringer", "Suara Aktif", "bell", 0xFF34C759)
+                    } else {
+                        audio.ringerMode = AudioManager.RINGER_MODE_VIBRATE
+                        showDynamicIslandNotification("Hening", "Mode Hening Aktif", "bell", 0xFFFF3B30)
+                    }
+                }
+            }
+            "Voice Memo" -> {
+                showDynamicIslandNotification("Voice Memos", "Merekam suara...", "mic", 0xFFFF2D55)
+            }
+            "Focus" -> {
+                val dnd = !_isDNDActive.value
+                _isDNDActive.value = dnd
+                showDynamicIslandNotification("Focus", if (dnd) "Do Not Disturb On" else "Do Not Disturb Off", "moon", 0xFF5856D6)
+            }
+            "Root Tools" -> openApp(AppId.ROOT_TOOLS)
+            else -> openApp(AppId.SETTINGS)
+        }
+    }
+
+    fun setCameraControlEnabled(enabled: Boolean, context: Context) {
+        _cameraControlEnabled.value = enabled
+        IOSPersistenceManager.saveCameraControlEnabled(context, enabled)
+    }
+
+    fun setCameraControlSensitivity(sensitivity: String, context: Context) {
+        _cameraControlSensitivity.value = sensitivity
+        IOSFeedbackHelper.vibrateLight(context)
+    }
+
+    fun setStandByEnabled(enabled: Boolean, context: Context) {
+        _standByEnabled.value = enabled
+        IOSPersistenceManager.saveStandByEnabled(context, enabled)
+    }
+
+    fun setStandByNightMode(enabled: Boolean) {
+        _standByNightMode.value = enabled
+    }
+
+    fun setStandByAlwaysOn(enabled: Boolean) {
+        _standByAlwaysOn.value = enabled
+    }
+
+    fun setFocusMode(mode: com.example.model.FocusMode, context: Context) {
+        _currentFocusMode.value = mode
+        OverlayBridge.currentFocusMode.value = mode
+        _isDNDActive.value = (mode != com.example.model.FocusMode.OFF)
+        IOSPersistenceManager.saveFocusMode(context, mode)
+        if (mode == com.example.model.FocusMode.OFF) {
+            showDynamicIslandNotification("Fokus Dinonaktifkan", "Pemberitahuan aktif kembali", "bell", 0xFF8E8E93)
+        } else {
+            showDynamicIslandNotification("Fokus Aktif", mode.label, mode.iconKey, mode.colorLong)
+        }
+    }
+
+    fun toggleFocusMode(context: Context) {
+        val next = if (_currentFocusMode.value == com.example.model.FocusMode.OFF) {
+            com.example.model.FocusMode.DO_NOT_DISTURB
+        } else {
+            com.example.model.FocusMode.OFF
+        }
+        setFocusMode(next, context)
+    }
+
+    fun setBackTapEnabled(enabled: Boolean, context: Context) {
+        _backTapEnabled.value = enabled
+        IOSPersistenceManager.saveBackTapEnabled(context, enabled)
+    }
+
+    fun setBackTapDoubleAction(action: com.example.model.BackTapAction, context: Context) {
+        _backTapDoubleAction.value = action
+        IOSPersistenceManager.saveBackTapDoubleAction(context, action)
+    }
+
+    fun setBackTapTripleAction(action: com.example.model.BackTapAction, context: Context) {
+        _backTapTripleAction.value = action
+        IOSPersistenceManager.saveBackTapTripleAction(context, action)
+    }
+
+    fun triggerBackTapAction(action: com.example.model.BackTapAction, context: Context) {
+        when (action) {
+            com.example.model.BackTapAction.FLASHLIGHT -> {
+                toggleFlashlight(context)
+                val status = if (_flashlightEnabled.value) "Senter Menyala" else "Senter Dimatikan"
+                showDynamicIslandNotification("Back Tap", status, "flashlight", 0xFFFFCC00)
+            }
+            com.example.model.BackTapAction.SCREENSHOT -> {
+                showDynamicIslandNotification("Back Tap", "Menangkap Layar...", "camera", 0xFF007AFF)
+                com.example.util.RootExecutor.execute("screencap -p /sdcard/Pictures/Screenshots/screenshot_\$(date +%Y%m%d_%H%M%S).png")
+            }
+            com.example.model.BackTapAction.CONTROL_CENTER -> {
+                _isControlCenterOpen.value = true
+                _isNotificationCenterOpen.value = false
+            }
+            com.example.model.BackTapAction.NOTIFICATION_CENTER -> {
+                _isNotificationCenterOpen.value = true
+                _isControlCenterOpen.value = false
+            }
+            com.example.model.BackTapAction.APP_SWITCHER -> {
+                openAppSwitcher()
+            }
+            com.example.model.BackTapAction.LOCK_SCREEN -> {
+                lockDevice()
+            }
+            com.example.model.BackTapAction.MUTE -> {
+                val audio = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                if (audio != null) {
+                    val currentMode = audio.ringerMode
+                    if (currentMode == AudioManager.RINGER_MODE_SILENT || currentMode == AudioManager.RINGER_MODE_VIBRATE) {
+                        audio.ringerMode = AudioManager.RINGER_MODE_NORMAL
+                        showDynamicIslandNotification("Ringer", "Suara Aktif", "bell", 0xFF34C759)
+                    } else {
+                        audio.ringerMode = AudioManager.RINGER_MODE_VIBRATE
+                        showDynamicIslandNotification("Hening", "Mode Hening Aktif", "bell", 0xFFFF3B30)
+                    }
+                }
+            }
+            com.example.model.BackTapAction.NONE -> {}
+        }
     }
 }

@@ -767,17 +767,7 @@ fun SafariApp(
                 IconButton(
                     onClick = {
                         if (currentUrl != "about:blank") {
-                            try {
-                                val sendIntent = Intent().apply {
-                                    action = Intent.ACTION_SEND
-                                    putExtra(Intent.EXTRA_TEXT, currentUrl)
-                                    type = "text/plain"
-                                }
-                                val shareIntent = Intent.createChooser(sendIntent, "Share $pageTitle")
-                                context.startActivity(shareIntent)
-                            } catch (e: Exception) {
-                                viewModel.showDynamicIslandNotification("Safari", "Tautan disalin: $currentUrl", "safari", 0xFF007AFF)
-                            }
+                            viewModel.openShareSheet(pageTitle.ifBlank { currentUrl })
                         } else {
                             viewModel.showDynamicIslandNotification("Safari", "Buka halaman untuk membagikan", "safari", 0xFF007AFF)
                         }

@@ -344,21 +344,7 @@ fun PhotosApp(
 
                         IconButton(
                             onClick = {
-                                try {
-                                    val sendIntent = Intent().apply {
-                                        action = Intent.ACTION_SEND
-                                        if (photo.imageUri != null) {
-                                            putExtra(Intent.EXTRA_STREAM, Uri.parse(photo.imageUri))
-                                            type = "image/jpeg"
-                                        } else {
-                                            putExtra(Intent.EXTRA_TEXT, "Photo: ${photo.title}")
-                                            type = "text/plain"
-                                        }
-                                    }
-                                    context.startActivity(Intent.createChooser(sendIntent, "Share Photo"))
-                                } catch (e: Exception) {
-                                    // Handled
-                                }
+                                viewModel.openShareSheet(photo.title.ifBlank { "Photo" })
                             },
                             modifier = Modifier
                                 .size(36.dp)

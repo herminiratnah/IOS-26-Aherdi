@@ -83,109 +83,113 @@ fun MessagesApp(
                 isDarkIcons = true
             )
 
-            if (isViewingThread && activeThread != null) {
-                // Conversation Detail View
-                ChatDetailView(
-                    thread = activeThread,
-                    onBack = { isViewingThread = false },
-                    onSendMessage = { text ->
-                        viewModel.sendRealSms(activeThread.id, text, context)
-                    },
-                    onCallContact = {
-                        viewModel.makeRealPhoneCall(context, activeThread.id)
-                    }
-                )
-            } else {
-                // Conversation List View (Matches Image 2)
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp)
-                ) {
-                    // Top Navigation Header
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp, bottom = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(onClick = { /* Filter */ }) {
-                            Icon(
-                                imageVector = Icons.Rounded.Tune,
-                                contentDescription = "Filter",
-                                tint = IOSBlue
-                            )
+            Box(
+                modifier = Modifier.weight(1f).fillMaxWidth()
+            ) {
+                if (isViewingThread && activeThread != null) {
+                    // Conversation Detail View
+                    ChatDetailView(
+                        thread = activeThread,
+                        onBack = { isViewingThread = false },
+                        onSendMessage = { text ->
+                            viewModel.sendRealSms(activeThread.id, text, context)
+                        },
+                        onCallContact = {
+                            viewModel.makeRealPhoneCall(context, activeThread.id)
                         }
-                        IconButton(onClick = { isComposingNewMessage = true }) {
-                            Icon(
-                                imageVector = Icons.Rounded.Edit,
-                                contentDescription = "Compose",
-                                tint = IOSBlue
-                            )
-                        }
-                    }
-
-                    // Large Title "Messages"
-                    Text(
-                        text = "Messages",
-                        fontSize = 34.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.Black,
-                        letterSpacing = (-0.5).sp,
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                     )
-
-                    // iOS Search Bar
-                    Box(
+                } else {
+                    // Conversation List View (Matches Image 2)
+                    Column(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 8.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(IOSSystemGray6)
-                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                            .fillMaxSize()
+                            .padding(horizontal = 16.dp)
                     ) {
+                        // Top Navigation Header
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp, bottom = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Search,
-                                contentDescription = "Search",
-                                tint = IOSSystemGray,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Text(
-                                text = "Search",
-                                color = IOSSystemGray,
-                                fontSize = 16.sp
-                            )
+                            IconButton(onClick = { /* Filter */ }) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Tune,
+                                    contentDescription = "Filter",
+                                    tint = IOSBlue
+                                )
+                            }
+                            IconButton(onClick = { isComposingNewMessage = true }) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Edit,
+                                    contentDescription = "Compose",
+                                    tint = IOSBlue
+                                )
+                            }
                         }
-                    }
 
-                    // Message List matching Image 2
-                    val filteredThreads = threads.filter {
-                        it.contactName.contains(searchQuery, ignoreCase = true) ||
-                                it.lastMessage.contains(searchQuery, ignoreCase = true)
-                    }
+                        // Large Title "Messages"
+                        Text(
+                            text = "Messages",
+                            fontSize = 34.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Black,
+                            letterSpacing = (-0.5).sp,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                        )
 
-                    LazyColumn(
-                        modifier = Modifier.weight(1f),
-                        contentPadding = PaddingValues(vertical = 4.dp)
-                    ) {
-                        items(filteredThreads) { thread ->
-                            MessageThreadItem(
-                                thread = thread,
-                                onClick = {
-                                    viewModel.selectMessageThread(thread.id)
-                                    isViewingThread = true
-                                }
-                            )
-                            HorizontalDivider(
-                                color = IOSSystemGray5,
-                                thickness = 0.5.dp,
-                                modifier = Modifier.padding(start = 68.dp)
-                            )
+                        // iOS Search Bar
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(IOSSystemGray6)
+                                .padding(horizontal = 10.dp, vertical = 8.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Search,
+                                    contentDescription = "Search",
+                                    tint = IOSSystemGray,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = "Search",
+                                    color = IOSSystemGray,
+                                    fontSize = 16.sp
+                                )
+                            }
+                        }
+
+                        // Message List matching Image 2
+                        val filteredThreads = threads.filter {
+                            it.contactName.contains(searchQuery, ignoreCase = true) ||
+                                    it.lastMessage.contains(searchQuery, ignoreCase = true)
+                        }
+
+                        LazyColumn(
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(vertical = 4.dp)
+                        ) {
+                            items(filteredThreads) { thread ->
+                                MessageThreadItem(
+                                    thread = thread,
+                                    onClick = {
+                                        viewModel.selectMessageThread(thread.id)
+                                        isViewingThread = true
+                                    }
+                                )
+                                HorizontalDivider(
+                                    color = IOSSystemGray5,
+                                    thickness = 0.5.dp,
+                                    modifier = Modifier.padding(start = 68.dp)
+                                )
+                            }
                         }
                     }
                 }

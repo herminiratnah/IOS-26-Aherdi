@@ -306,6 +306,8 @@ object IOSPersistenceManager {
     private const val KEY_WALLPAPER_RES = "wallpaper_res_id"
     private const val KEY_WALLPAPER_NAME = "wallpaper_name_label"
     private const val KEY_WALLPAPER_URI = "wallpaper_custom_uri"
+    private const val KEY_DEPTH_EFFECT = "depth_effect_enabled"
+    private const val KEY_DEPTH_THEME = "depth_theme_name"
 
     fun saveWallpaper(context: Context, resId: Int, name: String, uri: String? = null) {
         getPrefs(context).edit()
@@ -315,12 +317,27 @@ object IOSPersistenceManager {
             .apply()
     }
 
+    fun saveDepthConfig(context: Context, enabled: Boolean, theme: String) {
+        getPrefs(context).edit()
+            .putBoolean(KEY_DEPTH_EFFECT, enabled)
+            .putString(KEY_DEPTH_THEME, theme)
+            .apply()
+    }
+
     fun loadWallpaper(context: Context): Triple<Int, String, String?> {
         val prefs = getPrefs(context)
-        val resId = prefs.getInt(KEY_WALLPAPER_RES, com.example.R.drawable.ios26_wallpaper)
-        val name = prefs.getString(KEY_WALLPAPER_NAME, "iOS 26 Ambient") ?: "iOS 26 Ambient"
+        val resId = prefs.getInt(KEY_WALLPAPER_RES, com.example.R.drawable.wallpaper_mountain_depth)
+        val name = prefs.getString(KEY_WALLPAPER_NAME, "Alpine Mountain Peak") ?: "Alpine Mountain Peak"
         val uri = prefs.getString(KEY_WALLPAPER_URI, null)?.ifEmpty { null }
         return Triple(resId, name, uri)
+    }
+
+    fun loadDepthConfig(context: Context): Pair<Boolean, String> {
+        val prefs = getPrefs(context)
+        return Pair(
+            prefs.getBoolean(KEY_DEPTH_EFFECT, true),
+            prefs.getString(KEY_DEPTH_THEME, "mountain") ?: "mountain"
+        )
     }
 
     // ================= NOTES =================
@@ -390,4 +407,115 @@ object IOSPersistenceManager {
             e.printStackTrace()
         }
     }
+
+    // ================= IROOT STATES =================
+
+    fun saveRootBoolean(context: Context, key: String, value: Boolean) {
+        getPrefs(context).edit().putBoolean("iroot_$key", value).commit()
+    }
+
+    fun loadRootBoolean(context: Context, key: String, defaultValue: Boolean = false): Boolean {
+        return getPrefs(context).getBoolean("iroot_$key", defaultValue)
+    }
+
+    fun saveRootString(context: Context, key: String, value: String) {
+        getPrefs(context).edit().putString("iroot_$key", value).commit()
+    }
+
+    fun loadRootString(context: Context, key: String, defaultValue: String): String {
+        return getPrefs(context).getString("iroot_$key", defaultValue) ?: defaultValue
+    }
+
+    fun saveRootInt(context: Context, key: String, value: Int) {
+        getPrefs(context).edit().putInt("iroot_$key", value).commit()
+    }
+
+    fun loadRootInt(context: Context, key: String, defaultValue: Int): Int {
+        return getPrefs(context).getInt("iroot_$key", defaultValue)
+    }
+
+    // ================= CUSTOM APP ICONS =================
+    private const val PREFS_CUSTOM_ICONS = "ios_custom_app_icons"
+
+    fun loadCustomIcons(context: Context): Map<String, String> {
+        val prefs = context.getSharedPreferences(PREFS_CUSTOM_ICONS, Context.MODE_PRIVATE)
+        val result = mutableMapOf<String, String>()
+        for ((k, v) in prefs.all) {
+            if (v is String && v.isNotBlank()) {
+                result[k] = v
+            }
+        }
+        return result
+    }
+
+    fun saveCustomIcon(context: Context, appKey: String, filePath: String) {
+        context.getSharedPreferences(PREFS_CUSTOM_ICONS, Context.MODE_PRIVATE)
+            .edit().putString(appKey, filePath).apply()
+    }
+
+    fun removeCustomIcon(context: Context, appKey: String) {
+        context.getSharedPreferences(PREFS_CUSTOM_ICONS, Context.MODE_PRIVATE)
+            .edit().remove(appKey).apply()
+    }
+
+    // ================= IPHONE 16/17 & IOS 26 SETTINGS =================
+    fun loadActionButton(context: Context): String =
+        getPrefs(context).getString("action_button_function", "Flashlight") ?: "Flashlight"
+
+    fun saveActionButton(context: Context, func: String) =
+        getPrefs(context).edit().putString("action_button_function", func).apply()
+
+    fun loadCameraControlEnabled(context: Context): Boolean =
+        getPrefs(context).getBoolean("camera_control_enabled", true)
+
+    fun saveCameraControlEnabled(context: Context, enabled: Boolean) =
+        getPrefs(context).edit().putBoolean("camera_control_enabled", enabled).apply()
+
+    fun loadStandByEnabled(context: Context): Boolean =
+        getPrefs(context).getBoolean("standby_enabled", true)
+
+    fun saveStandByEnabled(context: Context, enabled: Boolean) =
+        getPrefs(context).edit().putBoolean("standby_enabled", enabled).commit()
+
+    fun loadFocusMode(context: Context): com.example.model.FocusMode {
+        val raw = getPrefs(context).getString("focus_mode", "OFF") ?: "OFF"
+        return try {
+            com.example.model.FocusMode.valueOf(raw)
+        } catch (e: Exception) {
+            com.example.model.FocusMode.OFF
+        }
+    }
+
+    fun saveFocusMode(context: Context, mode: com.example.model.FocusMode) =
+        getPrefs(context).edit().putString("focus_mode", mode.name).commit()
+
+    fun loadBackTapEnabled(context: Context): Boolean =
+        getPrefs(context).getBoolean("back_tap_enabled", true)
+
+    fun saveBackTapEnabled(context: Context, enabled: Boolean) =
+        getPrefs(context).edit().putBoolean("back_tap_enabled", enabled).commit()
+
+    fun loadBackTapDoubleAction(context: Context): com.example.model.BackTapAction {
+        val raw = getPrefs(context).getString("back_tap_double_action", "FLASHLIGHT") ?: "FLASHLIGHT"
+        return try {
+            com.example.model.BackTapAction.valueOf(raw)
+        } catch (e: Exception) {
+            com.example.model.BackTapAction.FLASHLIGHT
+        }
+    }
+
+    fun saveBackTapDoubleAction(context: Context, action: com.example.model.BackTapAction) =
+        getPrefs(context).edit().putString("back_tap_double_action", action.name).commit()
+
+    fun loadBackTapTripleAction(context: Context): com.example.model.BackTapAction {
+        val raw = getPrefs(context).getString("back_tap_triple_action", "SCREENSHOT") ?: "SCREENSHOT"
+        return try {
+            com.example.model.BackTapAction.valueOf(raw)
+        } catch (e: Exception) {
+            com.example.model.BackTapAction.SCREENSHOT
+        }
+    }
+
+    fun saveBackTapTripleAction(context: Context, action: com.example.model.BackTapAction) =
+        getPrefs(context).edit().putString("back_tap_triple_action", action.name).commit()
 }

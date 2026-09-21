@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 fun HomeBar(
     onGoHome: () -> Unit,
     onHoldForSiri: (() -> Unit)? = null,
+    onOpenAppSwitcher: (() -> Unit)? = null,
     isDark: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -31,14 +32,17 @@ fun HomeBar(
             .padding(bottom = 6.dp, top = 6.dp)
             .pointerInput(Unit) {
                 detectVerticalDragGestures { _, dragAmount ->
-                    // Swipe up to go home!
-                    if (dragAmount < -15) {
+                    // Swipe up to go home or app switcher
+                    if (dragAmount < -35 && onOpenAppSwitcher != null) {
+                        onOpenAppSwitcher()
+                    } else if (dragAmount < -15) {
                         onGoHome()
                     }
                 }
             }
             .combinedClickable(
                 onClick = onGoHome,
+                onDoubleClick = { onOpenAppSwitcher?.invoke() },
                 onLongClick = { onHoldForSiri?.invoke() }
             ),
         contentAlignment = Alignment.Center

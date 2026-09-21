@@ -46,6 +46,10 @@ fun SettingsApp(
     val wifiEnabled by viewModel.wifiEnabled.collectAsState()
     val bluetoothEnabled by viewModel.bluetoothEnabled.collectAsState()
     val currentWallpaperName by viewModel.currentWallpaperName.collectAsState()
+    val actionButtonFunction by viewModel.actionButtonFunction.collectAsState()
+    val cameraControlEnabled by viewModel.cameraControlEnabled.collectAsState()
+    val standByEnabled by viewModel.standByEnabled.collectAsState()
+    val currentFocus by viewModel.currentFocusMode.collectAsState()
 
     val mainScrollState = rememberScrollState()
     var currentSubPage by remember { mutableStateOf(SettingsSubPage.MAIN) }
@@ -258,19 +262,10 @@ fun SettingsApp(
                                     icon = Icons.Rounded.DoNotDisturbOn,
                                     iconBg = Color(0xFF5856D6),
                                     title = "Focus",
-                                    detail = "Do Not Disturb",
-                                    onClick = {
-                                        genericPageTitle = "Focus"
-                                        genericPageItems = listOf(
-                                            Pair("Do Not Disturb", "Set Up"),
-                                            Pair("Personal", "Set Up"),
-                                            Pair("Sleep", "Set Up"),
-                                            Pair("Work", "Set Up"),
-                                            Pair("Share Across Devices", "On")
-                                        )
-                                        currentSubPage = SettingsSubPage.APP_SETTINGS
-                                    }
+                                    detail = currentFocus.label,
+                                    onClick = { currentSubPage = SettingsSubPage.FOCUS }
                                 )
+
                                 HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
                                 IOSSettingsRow(
                                     icon = Icons.Rounded.HourglassBottom,
@@ -348,6 +343,30 @@ fun SettingsApp(
                                 )
                                 HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
                                 IOSSettingsRow(
+                                    icon = Icons.Rounded.NotificationsActive,
+                                    iconBg = Color(0xFFFF9500),
+                                    title = "Action Button",
+                                    detail = actionButtonFunction,
+                                    onClick = { currentSubPage = SettingsSubPage.ACTION_BUTTON }
+                                )
+                                HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
+                                IOSSettingsRow(
+                                    icon = Icons.Rounded.Camera,
+                                    iconBg = Color(0xFF2C2C2E),
+                                    title = "Camera Control",
+                                    detail = if (cameraControlEnabled) "On" else "Off",
+                                    onClick = { currentSubPage = SettingsSubPage.CAMERA_CONTROL }
+                                )
+                                HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
+                                IOSSettingsRow(
+                                    icon = Icons.Rounded.NightlightRound,
+                                    iconBg = Color(0xFF007AFF),
+                                    title = "StandBy",
+                                    detail = if (standByEnabled) "On" else "Off",
+                                    onClick = { currentSubPage = SettingsSubPage.STANDBY }
+                                )
+                                HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
+                                IOSSettingsRow(
                                     icon = Icons.Rounded.RecordVoiceOver,
                                     iconBg = Color(0xFF5856D6),
                                     title = "Siri & Apple Intelligence",
@@ -377,6 +396,14 @@ fun SettingsApp(
                                     title = "Battery",
                                     detail = "$batteryLevel%",
                                     onClick = { currentSubPage = SettingsSubPage.BATTERY }
+                                )
+                                HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
+                                IOSSettingsRow(
+                                    icon = Icons.Rounded.Code,
+                                    iconBg = Color(0xFF007AFF),
+                                    title = "Mode Pengembang",
+                                    detail = "HUD FPS, Animasi, Profiler RAM",
+                                    onClick = { currentSubPage = SettingsSubPage.DEVELOPER }
                                 )
                                 HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
                                 IOSSettingsRow(
@@ -465,18 +492,31 @@ fun SettingsApp(
                     SettingsSubPage.CELLULAR -> CellularSubPage(viewModel = viewModel, onBack = { currentSubPage = SettingsSubPage.MAIN })
                     SettingsSubPage.PERSONAL_HOTSPOT -> PersonalHotspotSubPage(viewModel = viewModel, onBack = { currentSubPage = SettingsSubPage.MAIN })
                     SettingsSubPage.SOUNDS -> SoundsSubPage(viewModel = viewModel, onBack = { currentSubPage = SettingsSubPage.MAIN })
-                    SettingsSubPage.GENERAL -> GeneralSubPage(onNavigate = { currentSubPage = it }, onBack = { currentSubPage = SettingsSubPage.MAIN })
-                    SettingsSubPage.ABOUT -> AboutSubPage(onBack = { currentSubPage = SettingsSubPage.GENERAL })
+                    SettingsSubPage.GENERAL -> GeneralSubPage(viewModel = viewModel, onNavigate = { currentSubPage = it }, onBack = { currentSubPage = SettingsSubPage.MAIN })
+                    SettingsSubPage.ABOUT -> AboutSubPage(viewModel = viewModel, onBack = { currentSubPage = SettingsSubPage.GENERAL })
+                    SettingsSubPage.SOFTWARE_UPDATE -> SoftwareUpdateSubPage(viewModel = viewModel, onBack = { currentSubPage = SettingsSubPage.GENERAL })
+                    SettingsSubPage.STORAGE -> StorageSubPage(viewModel = viewModel, onBack = { currentSubPage = SettingsSubPage.GENERAL })
                     SettingsSubPage.DISPLAY -> DisplaySubPage(viewModel = viewModel, onBack = { currentSubPage = SettingsSubPage.MAIN })
                     SettingsSubPage.WALLPAPER -> WallpaperSubPage(viewModel = viewModel, onBack = { currentSubPage = SettingsSubPage.MAIN })
                     SettingsSubPage.ACCESSIBILITY -> AccessibilitySubPage(viewModel = viewModel, onNavigate = { currentSubPage = it }, onBack = { currentSubPage = SettingsSubPage.MAIN })
                     SettingsSubPage.FACE_ID -> FaceIdPasscodeSubPage(viewModel = viewModel, onBack = { currentSubPage = SettingsSubPage.MAIN })
                     SettingsSubPage.SIRI -> SiriSubPage(viewModel = viewModel, onBack = { currentSubPage = SettingsSubPage.MAIN })
                     SettingsSubPage.EMERGENCY_SOS -> EmergencySosSubPage(viewModel = viewModel, onBack = { currentSubPage = SettingsSubPage.MAIN })
-                    SettingsSubPage.BATTERY -> BatterySubPage(viewModel = viewModel, onBack = { currentSubPage = SettingsSubPage.MAIN })
+                    SettingsSubPage.BATTERY -> BatterySubPage(viewModel = viewModel, onNavigate = { currentSubPage = it }, onBack = { currentSubPage = SettingsSubPage.MAIN })
                     SettingsSubPage.SYSTEM_OVERLAY -> SystemOverlaySubPage(viewModel = viewModel, onBack = { currentSubPage = SettingsSubPage.MAIN })
+                    SettingsSubPage.ACTION_BUTTON -> ActionButtonSubPage(viewModel = viewModel, onBack = { currentSubPage = SettingsSubPage.MAIN })
+                    SettingsSubPage.CAMERA_CONTROL -> CameraControlSubPage(viewModel = viewModel, onBack = { currentSubPage = SettingsSubPage.MAIN })
+                    SettingsSubPage.STANDBY -> StandBySubPage(viewModel = viewModel, onBack = { currentSubPage = SettingsSubPage.MAIN })
+                    SettingsSubPage.FOCUS -> FocusSubPage(viewModel = viewModel, onBack = { currentSubPage = SettingsSubPage.MAIN })
+                    SettingsSubPage.BACK_TAP -> BackTapSubPage(viewModel = viewModel, onBack = { currentSubPage = SettingsSubPage.ACCESSIBILITY })
                     SettingsSubPage.KEYBOARD -> KeyboardSubPage(viewModel = viewModel, onBack = { currentSubPage = SettingsSubPage.MAIN })
                     SettingsSubPage.DEFAULT_APPS -> DefaultAppsSubPage(onBack = { currentSubPage = SettingsSubPage.MAIN })
+                    SettingsSubPage.DATE_TIME -> DateTimeSubPage(viewModel = viewModel, onBack = { currentSubPage = SettingsSubPage.GENERAL })
+                    SettingsSubPage.LANGUAGE -> LanguageSubPage(viewModel = viewModel, onBack = { currentSubPage = SettingsSubPage.GENERAL })
+                    SettingsSubPage.VPN -> VpnSubPage(viewModel = viewModel, onBack = { currentSubPage = SettingsSubPage.GENERAL })
+                    SettingsSubPage.RESET -> ResetSubPage(viewModel = viewModel, onBack = { currentSubPage = SettingsSubPage.GENERAL })
+                    SettingsSubPage.DEVELOPER -> DeveloperSubPage(viewModel = viewModel, onBack = { currentSubPage = SettingsSubPage.MAIN })
+                    SettingsSubPage.BATTERY_HEALTH -> BatteryHealthSubPage(viewModel = viewModel, onBack = { currentSubPage = SettingsSubPage.BATTERY })
                     SettingsSubPage.APP_SETTINGS -> {
                         AppSettingsSubPage(
                             appName = genericPageTitle.ifEmpty { "Settings" },
@@ -484,19 +524,12 @@ fun SettingsApp(
                             onBack = { currentSubPage = SettingsSubPage.MAIN }
                         )
                     }
-                    SettingsSubPage.SOFTWARE_UPDATE, SettingsSubPage.STORAGE -> {
+                    else -> {
                         GenericSettingsSubPage(
                             title = genericPageTitle.ifEmpty { "Settings" },
                             items = genericPageItems.ifEmpty {
-                                listOf(Pair("Status", "Configured"), Pair("Version", "18.5"))
+                                listOf(Pair("Status", "Configured"))
                             },
-                            onBack = { currentSubPage = SettingsSubPage.MAIN }
-                        )
-                    }
-                    else -> {
-                        GenericSettingsSubPage(
-                            title = "Settings",
-                            items = listOf(Pair("Status", "Configured")),
                             onBack = { currentSubPage = SettingsSubPage.MAIN }
                         )
                     }
@@ -505,6 +538,7 @@ fun SettingsApp(
 
             HomeBar(
                 onGoHome = { viewModel.closeApp() },
+                onOpenAppSwitcher = { viewModel.openAppSwitcher() },
                 isDark = true
             )
         }

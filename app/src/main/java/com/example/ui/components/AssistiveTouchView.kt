@@ -87,15 +87,30 @@ fun AssistiveTouchView(
                         verticalArrangement = Arrangement.SpaceBetween,
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        // Top Row: Notification Center
-                        AssistiveMenuItem(
-                            icon = Icons.Rounded.Notifications,
-                            label = "Notifications",
-                            onClick = {
-                                isMenuOpen = false
-                                viewModel.toggleNotificationCenter()
-                            }
-                        )
+                        // Top Row: Notifications & App Switcher
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            AssistiveMenuItem(
+                                icon = Icons.Rounded.Notifications,
+                                label = "Notifications",
+                                onClick = {
+                                    isMenuOpen = false
+                                    viewModel.toggleNotificationCenter()
+                                }
+                            )
+
+                            AssistiveMenuItem(
+                                icon = Icons.Rounded.ViewCarousel,
+                                label = "App Switcher",
+                                onClick = {
+                                    isMenuOpen = false
+                                    viewModel.openAppSwitcher()
+                                }
+                            )
+                        }
 
                         // Middle Row: Siri, Home, Control Center
                         Row(

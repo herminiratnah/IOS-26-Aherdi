@@ -39,6 +39,7 @@ fun WeatherApp(
     val cellularBars by viewModel.cellularSignalBars.collectAsState()
     val networkType by viewModel.networkType.collectAsState()
     val airplaneMode by viewModel.airplaneMode.collectAsState()
+    val weatherData by viewModel.weatherData.collectAsState()
 
     var activeTab by remember { mutableStateOf("Forecast") } // "Forecast" or "Live Radar (Safari)"
 
@@ -166,25 +167,25 @@ fun WeatherApp(
                 item {
                     Spacer(modifier = Modifier.height(10.dp))
                     Text(
-                        text = "Jakarta",
+                        text = weatherData.city,
                         fontSize = 32.sp,
                         fontWeight = FontWeight.Normal,
                         color = Color.White
                     )
                     Text(
-                        text = "28°",
+                        text = "${weatherData.currentTemp}°",
                         fontSize = 86.sp,
                         fontWeight = FontWeight.Thin,
                         color = Color.White
                     )
                     Text(
-                        text = "Mostly Cloudy",
+                        text = weatherData.condition,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Medium,
                         color = Color.White.copy(alpha = 0.9f)
                     )
                     Text(
-                        text = "H:32°  L:24°",
+                        text = "H:${weatherData.highTemp}°  L:${weatherData.lowTemp}°",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Normal,
                         color = Color.White.copy(alpha = 0.8f)
@@ -203,21 +204,30 @@ fun WeatherApp(
                     ) {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Text(
-                                text = "Mostly cloudy conditions expected around 14:00.",
+                                text = "Kondisi ${weatherData.condition.lowercase()} diperkirakan sepanjang hari di ${weatherData.city}.",
                                 fontSize = 13.sp,
                                 color = Color.White.copy(alpha = 0.9f)
                             )
                             HorizontalDivider(color = Color(0x33FFFFFF), thickness = 0.5.dp)
 
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                                items(hourlyForecast) { item ->
+                                items(weatherData.hourly) { item ->
                                     Column(
                                         horizontalAlignment = Alignment.CenterHorizontally,
                                         verticalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
-                                        Text(item.first, color = Color.White, fontSize = 13.sp)
-                                        Icon(item.second, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
-                                        Text(item.third, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                                        Text(item.time, color = Color.White, fontSize = 13.sp)
+                                        Icon(
+                                            imageVector = when {
+                                                item.weatherCode in 61..82 -> Icons.Rounded.WaterDrop
+                                                item.weatherCode == 0 -> Icons.Rounded.WbSunny
+                                                else -> Icons.Rounded.WbCloudy
+                                            },
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                        Text(item.temp, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                                     }
                                 }
                             }
@@ -240,11 +250,11 @@ fun WeatherApp(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Icon(Icons.Rounded.CalendarToday, contentDescription = null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(14.dp))
-                                Text("10-DAY FORECAST", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text("7-DAY FORECAST", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                             HorizontalDivider(color = Color(0x33FFFFFF), thickness = 0.5.dp)
 
-                            dailyForecast.forEach { f ->
+                            weatherData.daily.forEach { f ->
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -252,9 +262,18 @@ fun WeatherApp(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(f.first, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.width(60.dp))
-                                    Icon(Icons.Rounded.WbSunny, contentDescription = null, tint = Color(0xFFFFCC00), modifier = Modifier.size(20.dp))
-                                    Text(f.second, color = Color.White.copy(alpha = 0.7f), fontSize = 15.sp)
+                                    Text(f.day, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.width(60.dp))
+                                    Icon(
+                                        imageVector = when {
+                                            f.weatherCode in 61..82 -> Icons.Rounded.WaterDrop
+                                            f.weatherCode == 0 -> Icons.Rounded.WbSunny
+                                            else -> Icons.Rounded.WbCloudy
+                                        },
+                                        contentDescription = null,
+                                        tint = if (f.weatherCode == 0) Color(0xFFFFCC00) else Color.White,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Text(f.minTemp, color = Color.White.copy(alpha = 0.7f), fontSize = 15.sp)
                                     Box(
                                         modifier = Modifier
                                             .width(90.dp)
@@ -266,7 +285,7 @@ fun WeatherApp(
                                                 )
                                             )
                                     )
-                                    Text(f.third, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                                    Text(f.maxTemp, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                                 }
                             }
                         }

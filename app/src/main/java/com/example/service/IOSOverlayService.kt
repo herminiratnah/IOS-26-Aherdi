@@ -4,9 +4,13 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.BroadcastReceiver
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.PixelFormat
+import android.media.AudioManager
 import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
@@ -54,7 +58,11 @@ import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.example.MainActivity
+import com.example.ui.components.IOSStatusBar
+import com.example.viewmodel.DynamicIslandData
+import com.example.viewmodel.DynamicIslandMode
 import com.example.util.RootExecutor
+import com.example.util.IOSTintedBackgroundManager
 import kotlinx.coroutines.*
 import java.text.SimpleDateFormat
 import java.util.*
@@ -94,18 +102,19 @@ class IOSOverlayService : Service() {
 
         fun start(context: Context) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
-                try {
-                    RootExecutor.execute("appops set ${context.packageName} SYSTEM_ALERT_WINDOW allow")
-                    RootExecutor.execute("pm grant ${context.packageName} android.permission.SYSTEM_ALERT_WINDOW")
-                } catch (ignored: Exception) {}
-                if (!Settings.canDrawOverlays(context)) {
-                    val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
-                        data = Uri.parse("package:${context.packageName}")
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                    }
-                    try { context.startActivity(intent) } catch (ignored: Exception) {}
-                    return
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        RootExecutor.execute("appops set ${context.packageName} SYSTEM_ALERT_WINDOW allow")
+                        RootExecutor.execute("pm grant ${context.packageName} android.permission.SYSTEM_ALERT_WINDOW")
+                        delay(400)
+                        if (Settings.canDrawOverlays(context)) {
+                            withContext(Dispatchers.Main) {
+                                start(context)
+                            }
+                        }
+                    } catch (ignored: Exception) {}
                 }
+                return
             }
             val intent = Intent(context, IOSOverlayService::class.java)
             try {
@@ -146,7 +155,11 @@ class IOSOverlayService : Service() {
                     .setContentText("Dynamic Island & Status Bar running over all apps")
                     .setSmallIcon(android.R.drawable.ic_dialog_info)
                     .build()
-                startForeground(2001, notification)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    startForeground(2001, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+                } else {
+                    startForeground(2001, notification)
+                }
             } catch (e: Exception) {}
         }
         overlayLifecycleOwner.create()
@@ -160,17 +173,28 @@ class IOSOverlayService : Service() {
             WindowManager.LayoutParams.TYPE_PHONE
         }
 
+        var flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
+            @Suppress("DEPRECATION")
+            flags = flags or WindowManager.LayoutParams.FLAG_LAYOUT_IN_OVERSCAN
+        }
+
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             layoutType,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            flags,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.TOP
+            gravity = Gravity.TOP or Gravity.START
+            x = 0
             y = 0
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
         }
 
         overlayView = ComposeView(this).apply {
@@ -195,8 +219,158 @@ class IOSOverlayService : Service() {
 
                 var currentTime by remember { mutableStateOf("09:41") }
                 var batteryPct by remember { mutableIntStateOf(100) }
+                var isCharging by remember { mutableStateOf(false) }
                 var isExpanded by remember { mutableStateOf(false) }
                 var activeNotification by remember { mutableStateOf<AppNotificationData?>(null) }
+                var temporaryIslandData by remember { mutableStateOf<DynamicIslandData?>(null) }
+                var currentForegroundPkg by remember { mutableStateOf("") }
+
+                // Auto-collapse temporary smart HUDs after 2.5 seconds
+                LaunchedEffect(temporaryIslandData) {
+                    if (temporaryIslandData != null) {
+                        delay(2500)
+                        temporaryIslandData = null
+                    }
+                }
+
+                var lastRingerMode by remember {
+                    val audio = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                    mutableIntStateOf(audio?.ringerMode ?: AudioManager.RINGER_MODE_NORMAL)
+                }
+
+                // Register intelligent hardware & system broadcast listeners (Charging, Volume, Ringer, Clipboard)
+                DisposableEffect(Unit) {
+                    val systemReceiver = object : BroadcastReceiver() {
+                        override fun onReceive(context: Context?, intent: Intent?) {
+                            when (intent?.action) {
+                                Intent.ACTION_POWER_CONNECTED -> {
+                                    val bm = getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+                                    val pct = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: batteryPct
+                                    isCharging = true
+                                    temporaryIslandData = DynamicIslandData(
+                                        mode = DynamicIslandMode.BATTERY,
+                                        title = "Mengisi Daya",
+                                        subtitle = "$pct%",
+                                        icon = "charging",
+                                        accentColor = 0xFF34C759
+                                    )
+                                }
+                                Intent.ACTION_POWER_DISCONNECTED -> {
+                                    val bm = getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+                                    val pct = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: batteryPct
+                                    isCharging = false
+                                    temporaryIslandData = DynamicIslandData(
+                                        mode = DynamicIslandMode.BATTERY,
+                                        title = "Dilepas",
+                                        subtitle = "$pct%",
+                                        icon = "battery",
+                                        accentColor = 0xFF8E8E93
+                                    )
+                                }
+                                "android.media.VOLUME_CHANGED_ACTION" -> {
+                                    val audio = getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
+                                    val cur = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
+                                    val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                                    if (max > 0) {
+                                        val pct = ((cur.toFloat() / max.toFloat()) * 100).toInt()
+                                        temporaryIslandData = DynamicIslandData(
+                                            mode = DynamicIslandMode.VOLUME,
+                                            title = "Volume",
+                                            subtitle = "$pct%",
+                                            icon = if (cur == 0) "volume_mute" else "volume",
+                                            accentColor = 0xFFFFFFFF
+                                        )
+                                    }
+                                }
+                                AudioManager.RINGER_MODE_CHANGED_ACTION -> {
+                                    val audio = getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
+                                    val newRingerMode = audio.ringerMode
+                                    if (newRingerMode != lastRingerMode) {
+                                        lastRingerMode = newRingerMode
+                                        when (newRingerMode) {
+                                            AudioManager.RINGER_MODE_SILENT -> {
+                                                temporaryIslandData = DynamicIslandData(
+                                                    mode = DynamicIslandMode.NOTIFICATION,
+                                                    title = "Hening",
+                                                    subtitle = "Mode Senyap Aktif",
+                                                    icon = "volume_mute",
+                                                    accentColor = 0xFFFF3B30
+                                                )
+                                            }
+                                            AudioManager.RINGER_MODE_VIBRATE -> {
+                                                temporaryIslandData = DynamicIslandData(
+                                                    mode = DynamicIslandMode.NOTIFICATION,
+                                                    title = "Getar",
+                                                    subtitle = "Mode Getar Aktif",
+                                                    icon = "volume",
+                                                    accentColor = 0xFFFF9500
+                                                )
+                                            }
+                                            AudioManager.RINGER_MODE_NORMAL -> {
+                                                temporaryIslandData = DynamicIslandData(
+                                                    mode = DynamicIslandMode.NOTIFICATION,
+                                                    title = "Dering",
+                                                    subtitle = "Mode Suara Aktif",
+                                                    icon = "volume",
+                                                    accentColor = 0xFF34C759
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    val filter = IntentFilter().apply {
+                        addAction(Intent.ACTION_POWER_CONNECTED)
+                        addAction(Intent.ACTION_POWER_DISCONNECTED)
+                        addAction("android.media.VOLUME_CHANGED_ACTION")
+                        addAction(AudioManager.RINGER_MODE_CHANGED_ACTION)
+                    }
+                    registerReceiver(systemReceiver, filter)
+
+                    // Smart clipboard detection
+                    val clipManager = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                    val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
+                        try {
+                            val clip = clipManager?.primaryClip
+                            if (clip != null && clip.itemCount > 0) {
+                                val text = clip.getItemAt(0)?.coerceToText(this@IOSOverlayService)?.toString()?.trim() ?: ""
+                                if (text.isNotBlank() && text.length <= 35) {
+                                    temporaryIslandData = DynamicIslandData(
+                                        mode = DynamicIslandMode.NOTIFICATION,
+                                        title = "Papan Klip",
+                                        subtitle = "Disalin: \"$text\"",
+                                        icon = "terminal",
+                                        accentColor = 0xFF007AFF
+                                    )
+                                } else if (text.isNotBlank()) {
+                                    temporaryIslandData = DynamicIslandData(
+                                        mode = DynamicIslandMode.NOTIFICATION,
+                                        title = "Papan Klip",
+                                        subtitle = "Teks disalin ke papan klip",
+                                        icon = "terminal",
+                                        accentColor = 0xFF007AFF
+                                    )
+                                }
+                            }
+                        } catch (_: Exception) {}
+                    }
+                    clipManager?.addPrimaryClipChangedListener(clipListener)
+
+                    onDispose {
+                        try {
+                            unregisterReceiver(systemReceiver)
+                        } catch (_: Exception) {}
+                        try {
+                            clipManager?.removePrimaryClipChangedListener(clipListener)
+                        } catch (_: Exception) {}
+                    }
+                }
+
+                // Synchronized Dynamic Island state with Launcher ViewModel
+                val bridgeIslandData by OverlayBridge.dynamicIslandData.collectAsState()
 
                 // Collect Cross-App States from OverlayBridge
                 val isMusicPlaying by OverlayBridge.isMusicPlaying.collectAsState()
@@ -209,14 +383,38 @@ class IOSOverlayService : Service() {
                 val isInCall by OverlayBridge.isInCall.collectAsState()
                 val callName by OverlayBridge.callName.collectAsState()
                 val callDuration by OverlayBridge.callDuration.collectAsState()
+                val bridgeFocusMode by OverlayBridge.currentFocusMode.collectAsState()
 
-                // Live Clock and Battery (only updates when active in other apps)
+                // Ensure display overscan is always 0,0,0,0 so Status Bar & Dynamic Island
+                // never follow downward and remain firmly pinned to the physical top (Y=0)
+                LaunchedEffect(Unit) {
+                    RootExecutor.resetTopDisplayInset()
+                }
+
+                // Detect Foreground Package to smartly adapt Status Bar color to WhatsApp & all other apps
+                LaunchedEffect(Unit) {
+                    while (isActive) {
+                        try {
+                            val pkg = IOSTintedBackgroundManager.detectForegroundPackage(this@IOSOverlayService, packageName)
+                            if (pkg.isNotBlank() && pkg != currentForegroundPkg) {
+                                currentForegroundPkg = pkg
+                                OverlayBridge.currentForegroundPackage.value = pkg
+                            }
+                        } catch (_: Exception) {}
+                        delay(600)
+                    }
+                }
+
+                // Live Clock and Battery
                 LaunchedEffect(Unit) {
                     val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
                     val bm = getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
                     while (isActive) {
                         currentTime = sdf.format(Date())
                         batteryPct = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: 100
+                        val status = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+                            ?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+                        isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
                         delay(2000)
                     }
                 }
@@ -232,506 +430,119 @@ class IOSOverlayService : Service() {
                     }
                 }
 
-                // Equalizer Bar Animation - only active when music is actually playing to save battery/CPU!
-                val infiniteTransition = rememberInfiniteTransition(label = "music_eq")
-                val bar1 by if (isMusicPlaying) {
-                    infiniteTransition.animateFloat(
-                        initialValue = 0.3f, targetValue = 1.0f,
-                        animationSpec = infiniteRepeatable(tween(350, easing = LinearEasing), RepeatMode.Reverse),
-                        label = "bar1"
-                    )
-                } else {
-                    remember { mutableFloatStateOf(0.4f) }
-                }
-                val bar2 by if (isMusicPlaying) {
-                    infiniteTransition.animateFloat(
-                        initialValue = 0.8f, targetValue = 0.2f,
-                        animationSpec = infiniteRepeatable(tween(420, easing = LinearEasing), RepeatMode.Reverse),
-                        label = "bar2"
-                    )
-                } else {
-                    remember { mutableFloatStateOf(0.6f) }
-                }
-                val bar3 by if (isMusicPlaying) {
-                    infiniteTransition.animateFloat(
-                        initialValue = 0.2f, targetValue = 0.9f,
-                        animationSpec = infiniteRepeatable(tween(300, easing = LinearEasing), RepeatMode.Reverse),
-                        label = "bar3"
-                    )
-                } else {
-                    remember { mutableFloatStateOf(0.3f) }
-                }
-                val bar4 by if (isMusicPlaying) {
-                    infiniteTransition.animateFloat(
-                        initialValue = 0.6f, targetValue = 0.3f,
-                        animationSpec = infiniteRepeatable(tween(480, easing = LinearEasing), RepeatMode.Reverse),
-                        label = "bar4"
-                    )
-                } else {
-                    remember { mutableFloatStateOf(0.5f) }
-                }
-
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 2.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    // Top Status Bar
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 2.dp, bottom = 2.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Left: Clock (tappable to open launcher)
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .clickable {
-                                    val launchIntent = Intent(this@IOSOverlayService, MainActivity::class.java).apply {
-                                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                                    }
-                                    startActivity(launchIntent)
-                                }
-                                .padding(horizontal = 4.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = currentTime,
-                                color = Color.White,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
+                // Unified Dynamic Island: Prioritize temporary smart HUDs, notifications, calls, music
+                val currentIslandData = remember(temporaryIslandData, bridgeIslandData, activeNotification, isInCall, isExpanded, isMusicPlaying, songTitle, songArtist, callName, callDuration) {
+                    when {
+                        temporaryIslandData != null -> temporaryIslandData!!
+                        activeNotification != null -> {
+                            DynamicIslandData(
+                                mode = if (isExpanded) DynamicIslandMode.NOTIFICATION else DynamicIslandMode.COMPACT,
+                                title = activeNotification!!.appName,
+                                subtitle = "${activeNotification!!.title}: ${activeNotification!!.message}",
+                                icon = activeNotification!!.iconKey,
+                                accentColor = activeNotification!!.accentColor,
+                                packageName = activeNotification!!.packageName,
+                                contentIntent = activeNotification!!.contentIntent
                             )
                         }
-
-                        // Center: Dynamic Island Pill
-                        Box(
-                            modifier = Modifier
-                                .animateContentSize(animationSpec = spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMedium))
-                                .clip(RoundedCornerShape(26.dp))
-                                .background(Color.Black)
-                                .clickable {
-                                    isExpanded = !isExpanded
-                                }
-                                .padding(
-                                    horizontal = if (isExpanded) 14.dp else 10.dp,
-                                    vertical = if (isExpanded) 10.dp else 6.dp
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            // PRIORITY 1: INCOMING NOTIFICATION (WhatsApp, Instagram, etc.)
-                            if (activeNotification != null) {
-                                val notif = activeNotification!!
-                                if (isExpanded) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                        modifier = Modifier.widthIn(max = 290.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(28.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(notif.accentColor)),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Rounded.Notifications,
-                                                contentDescription = null,
-                                                tint = Color.White,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = "${notif.appName}: ${notif.title}",
-                                                color = Color.White,
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                            Text(
-                                                text = notif.message,
-                                                color = Color(0xFFD1D1D6),
-                                                fontSize = 11.sp,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
-                                    }
-                                } else {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(10.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(notif.accentColor))
-                                        )
-                                        Text(
-                                            text = "${notif.appName}: ${notif.title}",
-                                            color = Color.White,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier.widthIn(max = 140.dp)
-                                        )
-                                    }
-                                }
-                            }
-                            // PRIORITY 2: ACTIVE CALL (In WhatsApp, Instagram, or Phone Call)
-                            else if (isInCall) {
-                                if (isExpanded) {
-                                    Column(
-                                        modifier = Modifier
-                                            .widthIn(max = 280.dp)
-                                            .padding(4.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(36.dp)
-                                                    .clip(CircleShape)
-                                                    .background(Color(0xFF34C759)),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Rounded.Call,
-                                                    contentDescription = null,
-                                                    tint = Color.White,
-                                                    modifier = Modifier.size(20.dp)
-                                                )
-                                            }
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = callName,
-                                                    color = Color.White,
-                                                    fontSize = 13.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    maxLines = 1
-                                                )
-                                                Text(
-                                                    text = "In Call • $callDuration",
-                                                    color = Color(0xFF34C759),
-                                                    fontSize = 11.sp,
-                                                    fontWeight = FontWeight.Medium
-                                                )
-                                            }
-                                            // End Call Button
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(32.dp)
-                                                    .clip(CircleShape)
-                                                    .background(Color(0xFFFF3B30))
-                                                    .clickable {
-                                                        OverlayBridge.onEndCall?.invoke()
-                                                        isExpanded = false
-                                                    },
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Rounded.CallEnd,
-                                                    contentDescription = "End Call",
-                                                    tint = Color.White,
-                                                    modifier = Modifier.size(16.dp)
-                                                )
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    // Compact Call Dynamic Island
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(10.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(0xFF34C759))
-                                        )
-                                        Text(
-                                            text = callName,
-                                            color = Color.White,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier.widthIn(max = 90.dp)
-                                        )
-                                        Text(
-                                            text = callDuration,
-                                            color = Color(0xFF34C759),
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                    }
-                                }
-                            }
-                            // PRIORITY 3: LIVE MUSIC PLAYING
-                            else if (isMusicPlaying) {
-                                if (isExpanded) {
-                                    // Full Expanded iOS Music Dynamic Island Card
-                                    Column(
-                                        modifier = Modifier
-                                            .widthIn(max = 290.dp)
-                                            .padding(4.dp),
-                                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            // Album Art
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(40.dp)
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .background(
-                                                        Brush.linearGradient(
-                                                            listOf(Color(0xFFFF2D55), Color(0xFF5856D6))
-                                                        )
-                                                    ),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Rounded.MusicNote,
-                                                    contentDescription = null,
-                                                    tint = Color.White,
-                                                    modifier = Modifier.size(22.dp)
-                                                )
-                                            }
-
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = songTitle,
-                                                    color = Color.White,
-                                                    fontSize = 13.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                                Text(
-                                                    text = songArtist,
-                                                    color = Color(0xFF8E8E93),
-                                                    fontSize = 11.sp,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                            }
-
-                                            // Animated Live Equalizer Wave
-                                            Row(
-                                                horizontalArrangement = Arrangement.spacedBy(3.dp),
-                                                verticalAlignment = Alignment.Bottom,
-                                                modifier = Modifier.height(20.dp)
-                                            ) {
-                                                Box(modifier = Modifier.width(3.dp).height((18 * bar1).dp.coerceAtLeast(4.dp)).clip(RoundedCornerShape(2.dp)).background(Color(0xFFFF2D55)))
-                                                Box(modifier = Modifier.width(3.dp).height((18 * bar2).dp.coerceAtLeast(4.dp)).clip(RoundedCornerShape(2.dp)).background(Color(0xFFFF2D55)))
-                                                Box(modifier = Modifier.width(3.dp).height((18 * bar3).dp.coerceAtLeast(4.dp)).clip(RoundedCornerShape(2.dp)).background(Color(0xFFFF2D55)))
-                                                Box(modifier = Modifier.width(3.dp).height((18 * bar4).dp.coerceAtLeast(4.dp)).clip(RoundedCornerShape(2.dp)).background(Color(0xFFFF2D55)))
-                                            }
-                                        }
-
-                                        // Progress Bar
-                                        Column(modifier = Modifier.fillMaxWidth()) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .height(4.dp)
-                                                    .clip(RoundedCornerShape(2.dp))
-                                                    .background(Color(0x33FFFFFF))
-                                            ) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth(musicProgress.coerceIn(0f, 1f))
-                                                        .fillMaxHeight()
-                                                        .background(Color.White)
-                                                )
-                                            }
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                                                horizontalArrangement = Arrangement.SpaceBetween
-                                            ) {
-                                                Text(text = musicCurrentTimeStr, color = Color(0xFF8E8E93), fontSize = 10.sp)
-                                                Text(text = musicDurationStr, color = Color(0xFF8E8E93), fontSize = 10.sp)
-                                            }
-                                        }
-
-                                        // Media Controls
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceEvenly,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(34.dp)
-                                                    .clip(CircleShape)
-                                                    .clickable { OverlayBridge.onPrevSong?.invoke() },
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Rounded.SkipPrevious,
-                                                    contentDescription = "Previous",
-                                                    tint = Color.White,
-                                                    modifier = Modifier.size(24.dp)
-                                                )
-                                            }
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(42.dp)
-                                                    .clip(CircleShape)
-                                                    .background(Color.White)
-                                                    .clickable { OverlayBridge.onTogglePlayPause?.invoke() },
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Rounded.Pause,
-                                                    contentDescription = "Pause",
-                                                    tint = Color.Black,
-                                                    modifier = Modifier.size(24.dp)
-                                                )
-                                            }
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(34.dp)
-                                                    .clip(CircleShape)
-                                                    .clickable { OverlayBridge.onNextSong?.invoke() },
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Rounded.SkipNext,
-                                                    contentDescription = "Next",
-                                                    tint = Color.White,
-                                                    modifier = Modifier.size(24.dp)
-                                                )
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    // Compact Music Pill with Live Animated Wave
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        // Mini Album Art
-                                        Box(
-                                            modifier = Modifier
-                                                .size(16.dp)
-                                                .clip(RoundedCornerShape(4.dp))
-                                                .background(
-                                                    Brush.linearGradient(
-                                                        listOf(Color(0xFFFF2D55), Color(0xFF5856D6))
-                                                    )
-                                                ),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Rounded.MusicNote,
-                                                contentDescription = null,
-                                                tint = Color.White,
-                                                modifier = Modifier.size(10.dp)
-                                            )
-                                        }
-
-                                        Text(
-                                            text = songTitle,
-                                            color = Color.White,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier.widthIn(max = 110.dp)
-                                        )
-
-                                        // Live Equalizer Sound Wave Animation
-                                        Row(
-                                            horizontalArrangement = Arrangement.spacedBy(2.dp),
-                                            verticalAlignment = Alignment.Bottom,
-                                            modifier = Modifier.height(13.dp)
-                                        ) {
-                                            Box(modifier = Modifier.width(2.5.dp).height((12 * bar1).dp.coerceAtLeast(3.dp)).clip(RoundedCornerShape(1.dp)).background(Color(0xFFFF2D55)))
-                                            Box(modifier = Modifier.width(2.5.dp).height((12 * bar2).dp.coerceAtLeast(3.dp)).clip(RoundedCornerShape(1.dp)).background(Color(0xFFFF2D55)))
-                                            Box(modifier = Modifier.width(2.5.dp).height((12 * bar3).dp.coerceAtLeast(3.dp)).clip(RoundedCornerShape(1.dp)).background(Color(0xFFFF2D55)))
-                                            Box(modifier = Modifier.width(2.5.dp).height((12 * bar4).dp.coerceAtLeast(3.dp)).clip(RoundedCornerShape(1.dp)).background(Color(0xFFFF2D55)))
-                                        }
-                                    }
-                                }
-                            }
-                            // PRIORITY 4: STANDARD COMPACT DYNAMIC ISLAND PILL
-                            else {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    // Camera lens circle
-                                    Box(
-                                        modifier = Modifier
-                                            .size(9.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0xFF1C1C1E))
-                                    )
-                                    // iOS indicator dot
-                                    Box(
-                                        modifier = Modifier
-                                            .size(7.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0xFF34C759))
-                                    )
-                                }
-                            }
+                        isInCall -> {
+                            DynamicIslandData(
+                                mode = DynamicIslandMode.CALL,
+                                title = callName.ifBlank { "Panggilan Masuk" },
+                                subtitle = callDuration.ifBlank { "00:00" },
+                                icon = "phone",
+                                accentColor = 0xFF34C759
+                            )
                         }
-
-                        // Right: Signal, Wi-Fi, Battery
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(5.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.SignalCellularAlt,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(15.dp)
+                        bridgeIslandData.mode != DynamicIslandMode.COMPACT -> {
+                            bridgeIslandData
+                        }
+                        isMusicPlaying && isExpanded -> {
+                            DynamicIslandData(
+                                mode = DynamicIslandMode.MUSIC,
+                                title = songTitle.ifBlank { "Music" },
+                                subtitle = songArtist.ifBlank { "Apple Music" },
+                                icon = "music",
+                                accentColor = 0xFFFF2D55
                             )
-                            Icon(
-                                imageVector = Icons.Rounded.Wifi,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(2.dp)
-                            ) {
-                                Text(
-                                    text = "$batteryPct%",
-                                    color = Color.White,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Icon(
-                                    imageVector = Icons.Rounded.BatteryFull,
-                                    contentDescription = null,
-                                    tint = if (batteryPct > 20) Color(0xFF34C759) else Color(0xFFFF3B30),
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
+                        }
+                        else -> {
+                            bridgeIslandData
                         }
                     }
+                }
+
+                // Smart status bar background color & icon contrast adaptation
+                val isNightMode = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
+
+                val (targetBgColor, isDarkIcons) = remember(currentForegroundPkg, isNightMode) {
+                    IOSTintedBackgroundManager.getThemeForPackage(currentForegroundPkg, isNightMode)
+                }
+
+                val animatedBgColor by androidx.compose.animation.animateColorAsState(
+                    targetValue = targetBgColor,
+                    animationSpec = tween(280),
+                    label = "StatusBarBgColor"
+                )
+
+                // Standalone iOS Status Bar container: owns dedicated top space at Y=0
+                // and perfectly blends with the active foreground app via dynamic tinted background
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(animatedBgColor)
+                ) {
+                    IOSStatusBar(
+                        dynamicIslandData = currentIslandData,
+                        onDismissDynamicIsland = {
+                            isExpanded = false
+                            OverlayBridge.onDismissDynamicIsland?.invoke()
+                        },
+                        onOpenControlCenter = {
+                            expandSettingsOverApp()
+                        },
+                        onOpenNotificationCenter = {
+                            expandNotificationsOverApp()
+                        },
+                        currentTime = currentTime,
+                        batteryLevel = batteryPct,
+                        isBatteryCharging = isCharging,
+                        isWifiConnected = true,
+                        wifiSignalLevel = 4,
+                        cellularBars = 4,
+                        networkType = "5G",
+                        isAirplaneMode = false,
+                        isDarkIcons = isDarkIcons,
+                        focusMode = bridgeFocusMode,
+                        isMusicPlaying = isMusicPlaying,
+                        musicProgress = musicProgress,
+                        musicCurrentTimeStr = musicCurrentTimeStr,
+                        musicDurationStr = musicDurationStr,
+                        onMusicPlayPause = { OverlayBridge.onTogglePlayPause?.invoke() },
+                        onMusicNext = { OverlayBridge.onNextSong?.invoke() },
+                        onMusicPrev = { OverlayBridge.onPrevSong?.invoke() },
+                        onExpandMusic = { isExpanded = !isExpanded },
+                        onOpenIslandAction = {
+                            val intent = currentIslandData.contentIntent
+                            if (intent != null) {
+                                try {
+                                    intent.send()
+                                } catch (_: Exception) {}
+                            } else {
+                                val targetPkg = currentIslandData.packageName
+                                if (!targetPkg.isNullOrBlank()) {
+                                    try {
+                                        val launchIntent = packageManager.getLaunchIntentForPackage(targetPkg)
+                                        if (launchIntent != null) {
+                                            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            startActivity(launchIntent)
+                                        }
+                                    } catch (_: Exception) {}
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             }
         }
@@ -741,6 +552,32 @@ class IOSOverlayService : Service() {
             windowManager?.addView(overlayView, params)
         } catch (e: Exception) {
             e.printStackTrace()
+        }
+    }
+
+    private fun expandSettingsOverApp() {
+        try {
+            @Suppress("WrongConstant")
+            val sbm = getSystemService("statusbar")
+            val method = sbm?.javaClass?.getMethod("expandSettingsPanel")
+            method?.invoke(sbm)
+        } catch (e: Exception) {
+            serviceScope.launch {
+                com.example.util.RootExecutor.executeCommand("cmd statusbar expand-settings || service call statusbar 2")
+            }
+        }
+    }
+
+    private fun expandNotificationsOverApp() {
+        try {
+            @Suppress("WrongConstant")
+            val sbm = getSystemService("statusbar")
+            val method = sbm?.javaClass?.getMethod("expandNotificationsPanel")
+            method?.invoke(sbm)
+        } catch (e: Exception) {
+            serviceScope.launch {
+                com.example.util.RootExecutor.executeCommand("cmd statusbar expand-notifications || service call statusbar 1")
+            }
         }
     }
 

@@ -47,6 +47,9 @@ fun SpotlightSearchOverlay(
 
     var query by remember { mutableStateOf("") }
     val keyboardController = LocalSoftwareKeyboardController.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val weatherData by viewModel.weatherData.collectAsState()
+    val flashlightEnabled by viewModel.flashlightEnabled.collectAsState()
 
     val allSearchItems = remember {
         listOf(
@@ -228,6 +231,132 @@ fun SpotlightSearchOverlay(
                 }
             }
 
+            // Live Weather Spotlight Card
+            val isWeatherQuery = query.isNotBlank() && (
+                query.contains("cuaca", ignoreCase = true) ||
+                query.contains("weather", ignoreCase = true) ||
+                query.contains("bandung", ignoreCase = true) ||
+                query.contains("suhu", ignoreCase = true) ||
+                query.contains("hujan", ignoreCase = true)
+            )
+            if (isWeatherQuery) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(Color(0xFF1C1C1E).copy(alpha = 0.95f))
+                        .clickable {
+                            keyboardController?.hide()
+                            viewModel.openApp(AppId.WEATHER)
+                            onDismiss()
+                        }
+                        .padding(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFF007AFF)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.WbCloudy,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = "Bandung • ${weatherData.currentTemp}°",
+                                    color = Color.White,
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "${weatherData.condition} • H:${weatherData.highTemp}° L:${weatherData.lowTemp}°",
+                                    color = Color.White.copy(alpha = 0.6f),
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                        Icon(
+                            imageVector = Icons.Rounded.ChevronRight,
+                            contentDescription = null,
+                            tint = Color.White.copy(alpha = 0.3f),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+
+            // Flashlight Quick Action Spotlight Card
+            val isFlashlightQuery = query.isNotBlank() && (
+                query.contains("senter", ignoreCase = true) ||
+                query.contains("flash", ignoreCase = true)
+            )
+            if (isFlashlightQuery) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(Color(0xFF1C1C1E).copy(alpha = 0.95f))
+                        .clickable {
+                            viewModel.toggleFlashlight(context)
+                        }
+                        .padding(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (flashlightEnabled) Color(0xFFFFCC00) else Color(0xFF636366)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.FlashlightOn,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = if (flashlightEnabled) "Matikan Senter" else "Nyalakan Senter",
+                                    color = Color.White,
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Ketuk untuk beralih instan",
+                                    color = Color.White.copy(alpha = 0.6f),
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+
             // Results List
             LazyColumn(
                 modifier = Modifier
@@ -295,6 +424,58 @@ fun SpotlightSearchOverlay(
                             tint = Color.White.copy(alpha = 0.3f),
                             modifier = Modifier.size(18.dp)
                         )
+                    }
+                }
+
+                if (query.isNotBlank()) {
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable {
+                                    keyboardController?.hide()
+                                    viewModel.openApp(AppId.SAFARI)
+                                    onDismiss()
+                                }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFF007AFF)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Explore,
+                                    contentDescription = "Safari Web Search",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Cari \"$query\" di Safari",
+                                    color = Color.White,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = "Pencarian Web Google",
+                                    color = Color.White.copy(alpha = 0.5f),
+                                    fontSize = 12.sp
+                                )
+                            }
+                            Icon(
+                                imageVector = Icons.Rounded.ArrowOutward,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.5f),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
             }

@@ -18,6 +18,7 @@ import android.provider.Telephony
 import android.telephony.SmsMessage
 import android.telephony.TelephonyManager
 import android.view.KeyEvent
+import android.view.View
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -55,16 +56,24 @@ import com.example.ui.components.HomeBar
 import com.example.ui.components.IOSControlCenter
 import com.example.ui.components.IOSNotificationCenter
 import com.example.ui.components.IOSStatusBar
+import com.example.ui.components.IOSLockScreenView
 import com.example.ui.components.SiriOverlay
 import com.example.ui.components.AssistiveTouchView
 import com.example.ui.components.SpotlightSearchOverlay
+import com.example.ui.components.IOSStandByOverlay
+import com.example.ui.components.IOSShareSheet
+import com.example.ui.components.IOSAppSwitcher
+import com.example.ui.components.IOSFpsOverlay
 import com.example.ui.screens.*
 import com.example.ui.theme.IOSBlue
 import com.example.ui.theme.MyApplicationTheme
+import com.example.util.BackTapDetector
 import com.example.viewmodel.IOSViewModel
+import android.content.res.Configuration
 
 class MainActivity : ComponentActivity() {
     private val viewModel: IOSViewModel by viewModels()
+    private var backTapDetector: BackTapDetector? = null
 
     private val batteryReceiver = object : BroadcastReceiver() {
         private var lastChargingState: Boolean? = null
@@ -83,6 +92,10 @@ class MainActivity : ComponentActivity() {
                 viewModel.showDynamicIslandBattery(batteryPct, isCharging)
             }
             lastChargingState = isCharging
+
+            if (isCharging && resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE && viewModel.standByEnabled.value) {
+                viewModel.openStandBy()
+            }
         }
     }
 
@@ -131,22 +144,32 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val screenStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == Intent.ACTION_SCREEN_OFF) {
+                viewModel.lockDevice()
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        hideSystemBars()
 
-        window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
-        window.addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             window.attributes.layoutInDisplayCutoutMode =
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
 
+        hideSystemBars()
+
         // Load all installed apps from device into iOS App Library
         viewModel.loadDeviceInstalledApps(this)
 
         // Register Receivers
+        val screenFilter = IntentFilter(Intent.ACTION_SCREEN_OFF)
+        registerReceiver(screenStateReceiver, screenFilter)
+
         val batteryFilter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
         registerReceiver(batteryReceiver, batteryFilter)
 
@@ -186,6 +209,64 @@ class MainActivity : ComponentActivity() {
                         accentColor = notif.accentColor
                     )
                 )
+                // Pop open Dynamic Island in Launcher Home
+                viewModel.showDynamicIslandNotification(
+                    title = notif.appName,
+                    message = "${notif.title}: ${notif.message}",
+                    icon = notif.iconKey,
+                    accent = notif.accentColor,
+                    packageName = notif.packageName,
+                    contentIntent = notif.contentIntent
+                )
+            }
+        }
+
+        // Initialize real device volume and brightness
+        val initialAudio = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        if (initialAudio != null) {
+            val cur = initialAudio.getStreamVolume(AudioManager.STREAM_MUSIC)
+            val max = initialAudio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+            if (max > 0) {
+                viewModel.syncCurrentVolume(cur.toFloat() / max.toFloat())
+            }
+        }
+        try {
+            val currentBrightness = Settings.System.getInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS)
+            viewModel.syncCurrentBrightness((currentBrightness / 255f).coerceIn(0.05f, 1.0f))
+        } catch (ignored: Exception) {}
+
+        // Connect ViewModel brightness slider directly to Window attributes for instant visual response
+        lifecycleScope.launch {
+            viewModel.brightness.collect { b ->
+                try {
+                    val lp = window.attributes
+                    lp.screenBrightness = b.coerceIn(0.01f, 1.0f)
+                    window.attributes = lp
+                } catch (ignored: Exception) {}
+            }
+        }
+
+        // Initialize iOS Back Tap Hardware Detection
+        backTapDetector = BackTapDetector(
+            context = this,
+            onDoubleTap = {
+                if (viewModel.backTapEnabled.value) {
+                    viewModel.triggerBackTapAction(viewModel.backTapDoubleAction.value, this)
+                }
+            },
+            onTripleTap = {
+                if (viewModel.backTapEnabled.value) {
+                    viewModel.triggerBackTapAction(viewModel.backTapTripleAction.value, this)
+                }
+            }
+        )
+        lifecycleScope.launch {
+            viewModel.backTapEnabled.collect { enabled ->
+                if (enabled) {
+                    backTapDetector?.start()
+                } else {
+                    backTapDetector?.stop()
+                }
             }
         }
 
@@ -196,10 +277,26 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE && viewModel.isBatteryCharging.value && viewModel.standByEnabled.value) {
+            viewModel.openStandBy()
+        } else if (newConfig.orientation == Configuration.ORIENTATION_PORTRAIT && viewModel.isStandByOpen.value) {
+            viewModel.closeStandBy()
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         OverlayBridge.isLauncherForeground.value = true
         IOSOverlayService.start(this)
+        if (viewModel.backTapEnabled.value) {
+            backTapDetector?.start()
+        }
+        // Pastikan launcher iOS selalu 100% fullscreen di Y=0 (Dynamic Island dan Status Bar di ujung atas fisik)
+        lifecycleScope.launch(Dispatchers.IO) {
+            RootExecutor.resetTopDisplayInset()
+        }
     }
 
     override fun onPause() {
@@ -214,6 +311,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        backTapDetector?.stop()
+        try {
+            unregisterReceiver(screenStateReceiver)
+        } catch (ignored: Exception) {}
         try {
             unregisterReceiver(batteryReceiver)
         } catch (ignored: Exception) {}
@@ -225,7 +326,42 @@ class MainActivity : ComponentActivity() {
         } catch (ignored: Exception) {}
     }
 
+    @SuppressLint("GestureBackNavigation")
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            if (viewModel.isDeviceLocked.value) {
+                return true
+            }
+            if (viewModel.isStandByOpen.value) {
+                viewModel.closeStandBy()
+                return true
+            }
+            if (viewModel.isShareSheetOpen.value) {
+                viewModel.closeShareSheet()
+                return true
+            }
+            if (viewModel.isControlCenterOpen.value) {
+                viewModel.closeControlCenter()
+                return true
+            }
+            if (viewModel.isNotificationCenterOpen.value) {
+                viewModel.closeNotificationCenter()
+                return true
+            }
+            if (viewModel.isSpotlightOpen.value) {
+                viewModel.closeSpotlight()
+                return true
+            }
+            if (viewModel.isSiriOpen.value) {
+                viewModel.closeSiri()
+                return true
+            }
+            if (viewModel.activeApp.value != null) {
+                viewModel.closeApp()
+                return true
+            }
+        }
+
         val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
         if (audioManager != null) {
             when (keyCode) {
@@ -237,7 +373,9 @@ class MainActivity : ComponentActivity() {
                     )
                     val currentVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
                     val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                    val fraction = if (maxVol > 0) currentVol.toFloat() / maxVol.toFloat() else 0.5f
                     val percent = (currentVol * 100) / maxVol.coerceAtLeast(1)
+                    viewModel.syncCurrentVolume(fraction)
                     viewModel.showDynamicIslandVolume(percent)
                     return true
                 }
@@ -249,7 +387,9 @@ class MainActivity : ComponentActivity() {
                     )
                     val currentVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
                     val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                    val fraction = if (maxVol > 0) currentVol.toFloat() / maxVol.toFloat() else 0.5f
                     val percent = (currentVol * 100) / maxVol.coerceAtLeast(1)
+                    viewModel.syncCurrentVolume(fraction)
                     viewModel.showDynamicIslandVolume(percent)
                     return true
                 }
@@ -260,39 +400,19 @@ class MainActivity : ComponentActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        hideSystemBars()
-        if (!hasFocus) {
-            // Android SystemUI attempted to expand or pull down shade - close it instantly
-            try {
-                @Suppress("DEPRECATION")
-                @SuppressLint("MissingPermission")
-                sendBroadcast(Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS))
-                sendBroadcast(Intent("com.android.systemui.statusbar.phone.COLLAPSE_PANELS"))
-            } catch (ignored: Exception) {}
+        if (hasFocus) {
+            hideSystemBars()
         }
     }
 
-    @SuppressLint("MissingPermission")
     private fun hideSystemBars() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val insetsController = WindowCompat.getInsetsController(window, window.decorView)
         insetsController.systemBarsBehavior =
-            WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         insetsController.hide(
             WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.navigationBars()
         )
-        try {
-            @Suppress("DEPRECATION")
-            sendBroadcast(Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS))
-            sendBroadcast(Intent("com.android.systemui.statusbar.phone.COLLAPSE_PANELS"))
-        } catch (ignored: Exception) {}
-        try {
-            val statusBarService = getSystemService("statusbar")
-            val statusBarManager = Class.forName("android.app.StatusBarManager")
-            val disable = statusBarManager.getMethod("disable", Int::class.javaPrimitiveType)
-            // 0x00010000 = DISABLE_EXPAND, 0x00040000 = DISABLE_NOTIFICATION_ALERTS, 0x00020000 = DISABLE_NOTIFICATION_ICONS
-            disable.invoke(statusBarService, 0x00010000 or 0x00040000 or 0x00020000 or 0x00100000)
-        } catch (ignored: Exception) {}
     }
 }
 
@@ -307,6 +427,10 @@ fun IOS26LauncherRoot(
     val isNotificationCenterOpen by viewModel.isNotificationCenterOpen.collectAsState()
     val isSiriOpen by viewModel.isSiriOpen.collectAsState()
     val isSpotlightOpen by viewModel.isSpotlightOpen.collectAsState()
+    val isStandByOpen by viewModel.isStandByOpen.collectAsState()
+    val isShareSheetOpen by viewModel.isShareSheetOpen.collectAsState()
+    val shareSheetTitle by viewModel.shareSheetTitle.collectAsState()
+    val isAppSwitcherOpen by viewModel.isAppSwitcherOpen.collectAsState()
 
     // Request necessary telephony, storage & system permissions for real iOS phone/SMS/Music experience
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -338,7 +462,11 @@ fun IOS26LauncherRoot(
 
     // Handle back button / gesture
     BackHandler {
-        if (isSiriOpen) {
+        if (isStandByOpen) {
+            viewModel.closeStandBy()
+        } else if (isShareSheetOpen) {
+            viewModel.closeShareSheet()
+        } else if (isSiriOpen) {
             viewModel.closeSiri()
         } else if (isSpotlightOpen) {
             viewModel.closeSpotlight()
@@ -436,8 +564,36 @@ fun IOS26LauncherRoot(
             onDismiss = { viewModel.closeSiri() }
         )
 
-        // AssistiveTouch Floating Virtual Home Button
+        // iOS StandBy Overlay
+        IOSStandByOverlay(
+            viewModel = viewModel,
+            isOpen = isStandByOpen,
+            onDismiss = { viewModel.closeStandBy() }
+        )
+
+        // iOS AirDrop & System Share Sheet Overlay
+        IOSShareSheet(
+            viewModel = viewModel,
+            isOpen = isShareSheetOpen,
+            title = shareSheetTitle,
+            onDismiss = { viewModel.closeShareSheet() }
+        )
+
+        // iOS Multitasking App Switcher
+        IOSAppSwitcher(
+            viewModel = viewModel,
+            isOpen = isAppSwitcherOpen,
+            onDismiss = { viewModel.closeAppSwitcher() }
+        )
+
+        // Developer Performance HUD
+        IOSFpsOverlay(viewModel = viewModel)
+
+        // AssistiveTouch (Floating iOS Home Button)
         AssistiveTouchView(viewModel = viewModel)
+
+        // iOS Lock Screen Overlay (Top-level device guard)
+        IOSLockScreenView(viewModel = viewModel)
     }
 }
 

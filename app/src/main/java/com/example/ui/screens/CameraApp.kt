@@ -15,6 +15,7 @@ import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.animation.*
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -29,7 +30,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -49,12 +49,23 @@ import com.example.ui.components.HomeBar
 import com.example.ui.components.IOSStatusBar
 import com.example.ui.theme.IOSBlue
 import com.example.ui.theme.IOSYellow
+import com.example.util.FlashlightHelper
+import com.example.util.IOSFeedbackHelper
 import com.example.viewmodel.IOSViewModel
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.*
+
+enum class IOSFlashMode {
+    OFF,
+    ON,
+    AUTO
+}
 
 @Composable
 fun CameraApp(
@@ -63,6 +74,7 @@ fun CameraApp(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val coroutineScope = rememberCoroutineScope()
     val dynamicIslandData by viewModel.dynamicIsland.collectAsState()
     val photoItems by viewModel.photoItems.collectAsState()
 
@@ -87,8 +99,18 @@ fun CameraApp(
     var cameraSelector by remember { mutableStateOf(CameraSelector.DEFAULT_BACK_CAMERA) }
     var selectedMode by remember { mutableStateOf("PHOTO") }
     var selectedZoom by remember { mutableStateOf("1x") }
-    var isFlashOn by remember { mutableStateOf(false) }
+    var flashMode by remember { mutableStateOf(IOSFlashMode.OFF) }
+    var isNightModeOn by remember { mutableStateOf(false) }
+    var isLivePhotoOn by remember { mutableStateOf(true) }
+    var isControlsDrawerOpen by remember { mutableStateOf(false) }
+    var timerSetting by remember { mutableStateOf(0) } // 0 = off, 3 = 3s, 10 = 10s
+    var selectedStyle by remember { mutableStateOf("Standard") }
+    var exposureCompensation by remember { mutableStateOf(0) } // -2 to +2
+
+    var countdownSeconds by remember { mutableStateOf(0) }
+    var isCapturingNightMode by remember { mutableStateOf(false) }
     var showFlashEffect by remember { mutableStateOf(false) }
+
     var cameraControl by remember { mutableStateOf<CameraControl?>(null) }
     var imageCapture: ImageCapture? by remember { mutableStateOf(null) }
     var isCameraBound by remember { mutableStateOf(false) }
@@ -116,6 +138,13 @@ fun CameraApp(
             }
             val capture = ImageCapture.Builder()
                 .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                .setFlashMode(
+                    when (flashMode) {
+                        IOSFlashMode.ON -> ImageCapture.FLASH_MODE_ON
+                        IOSFlashMode.AUTO -> ImageCapture.FLASH_MODE_AUTO
+                        IOSFlashMode.OFF -> ImageCapture.FLASH_MODE_OFF
+                    }
+                )
                 .build()
             imageCapture = capture
 
@@ -130,6 +159,47 @@ fun CameraApp(
             isCameraBound = true
         } catch (e: Exception) {
             isCameraBound = false
+        }
+    }
+
+    fun executeCapture() {
+        coroutineScope.launch {
+            if (isNightModeOn) {
+                isCapturingNightMode = true
+                IOSFeedbackHelper.vibrateMedium(context)
+                delay(2000)
+                isCapturingNightMode = false
+            }
+            showFlashEffect = true
+            IOSFeedbackHelper.playLockSound(context)
+            IOSFeedbackHelper.vibrateSuccess(context)
+            takePhotoSafely(
+                context = context,
+                imageCapture = imageCapture,
+                isCameraBound = isCameraBound,
+                flashMode = flashMode,
+                isLivePhoto = isLivePhotoOn,
+                photoFilter = selectedStyle,
+                viewModel = viewModel
+            )
+        }
+    }
+
+    fun triggerShutter() {
+        if (countdownSeconds > 0 || isCapturingNightMode) return
+        if (timerSetting > 0) {
+            coroutineScope.launch {
+                for (sec in timerSetting downTo 1) {
+                    countdownSeconds = sec
+                    IOSFeedbackHelper.playClickSound(context)
+                    IOSFeedbackHelper.vibrateLight(context)
+                    delay(1000)
+                }
+                countdownSeconds = 0
+                executeCapture()
+            }
+        } else {
+            executeCapture()
         }
     }
 
@@ -155,39 +225,99 @@ fun CameraApp(
                 isDarkIcons = false
             )
 
-            // Top Camera Controls Bar matching iOS Camera
+            // Top Camera Controls Bar matching authentic iOS Camera
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 6.dp),
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = { isFlashOn = !isFlashOn }) {
+                // 1. Flash Toggle Button (Off / On / Auto)
+                IconButton(
+                    onClick = {
+                        flashMode = when (flashMode) {
+                            IOSFlashMode.OFF -> IOSFlashMode.ON
+                            IOSFlashMode.ON -> IOSFlashMode.AUTO
+                            IOSFlashMode.AUTO -> IOSFlashMode.OFF
+                        }
+                        imageCapture?.flashMode = when (flashMode) {
+                            IOSFlashMode.ON -> ImageCapture.FLASH_MODE_ON
+                            IOSFlashMode.AUTO -> ImageCapture.FLASH_MODE_AUTO
+                            IOSFlashMode.OFF -> ImageCapture.FLASH_MODE_OFF
+                        }
+                        IOSFeedbackHelper.vibrateLight(context)
+                    }
+                ) {
                     Icon(
-                        imageVector = if (isFlashOn) Icons.Rounded.FlashOn else Icons.Rounded.FlashOff,
+                        imageVector = when (flashMode) {
+                            IOSFlashMode.OFF -> Icons.Rounded.FlashOff
+                            IOSFlashMode.ON -> Icons.Rounded.FlashOn
+                            IOSFlashMode.AUTO -> Icons.Rounded.FlashAuto
+                        },
                         contentDescription = "Flash",
-                        tint = if (isFlashOn) IOSYellow else Color.White
+                        tint = if (flashMode != IOSFlashMode.OFF) IOSYellow else Color.White
                     )
                 }
-                Icon(
-                    imageVector = Icons.Rounded.Nightlight,
-                    contentDescription = "Night Mode",
-                    tint = Color.White.copy(alpha = 0.8f),
-                    modifier = Modifier.size(20.dp)
-                )
-                Icon(
-                    imageVector = Icons.Rounded.KeyboardArrowUp,
-                    contentDescription = "More Settings",
-                    tint = Color.White.copy(alpha = 0.8f),
-                    modifier = Modifier.size(22.dp)
-                )
-                Icon(
-                    imageVector = Icons.Rounded.MotionPhotosOn,
-                    contentDescription = "Live Photo",
-                    tint = Color.White.copy(alpha = 0.8f),
-                    modifier = Modifier.size(22.dp)
-                )
+
+                // 2. Night Mode Toggle
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(if (isNightModeOn) Color(0x33FFCC00) else Color.Transparent)
+                        .clickable {
+                            isNightModeOn = !isNightModeOn
+                            IOSFeedbackHelper.vibrateLight(context)
+                        }
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Nightlight,
+                        contentDescription = "Night Mode",
+                        tint = if (isNightModeOn) IOSYellow else Color.White.copy(alpha = 0.8f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    if (isNightModeOn) {
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "3s",
+                            color = IOSYellow,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                // 3. Quick Controls Drawer Arrow
+                IconButton(
+                    onClick = {
+                        isControlsDrawerOpen = !isControlsDrawerOpen
+                        IOSFeedbackHelper.vibrateLight(context)
+                    }
+                ) {
+                    Icon(
+                        imageVector = if (isControlsDrawerOpen) Icons.Rounded.KeyboardArrowDown else Icons.Rounded.KeyboardArrowUp,
+                        contentDescription = "More Settings",
+                        tint = if (isControlsDrawerOpen) IOSYellow else Color.White.copy(alpha = 0.8f),
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+
+                // 4. Live Photo Toggle
+                IconButton(
+                    onClick = {
+                        isLivePhotoOn = !isLivePhotoOn
+                        IOSFeedbackHelper.vibrateLight(context)
+                    }
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.MotionPhotosOn,
+                        contentDescription = "Live Photo",
+                        tint = if (isLivePhotoOn) IOSYellow else Color.White.copy(alpha = 0.8f),
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
             }
 
             // Viewfinder View
@@ -214,7 +344,7 @@ fun CameraApp(
                     )
                 }
 
-                // If camera hardware preview is not active (emulator or hardware error), show active scenic camera preview
+                // If camera hardware preview is not active, scenic viewfinder fallback
                 if (!hasCameraPermission || !isCameraBound) {
                     Box(modifier = Modifier.fillMaxSize()) {
                         Image(
@@ -223,13 +353,11 @@ fun CameraApp(
                             contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize()
                         )
-                        // Live Viewfinder grid & HUD
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .background(Color(0x22000000))
                         )
-                        // Focus square
                         Box(
                             modifier = Modifier
                                 .size(64.dp)
@@ -248,18 +376,83 @@ fun CameraApp(
                             ) {
                                 Icon(Icons.Rounded.CameraAlt, contentDescription = null, tint = Color.White, modifier = Modifier.size(36.dp))
                                 Spacer(modifier = Modifier.height(8.dp))
-                                Text("Camera Access", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                Text("Akses Kamera", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                                 Spacer(modifier = Modifier.height(4.dp))
-                                Text("Tap to permit Camera to shoot live photos", color = Color.LightGray, fontSize = 12.sp, textAlign = TextAlign.Center)
+                                Text("Izinkan akses kamera untuk mengambil foto", color = Color.LightGray, fontSize = 12.sp, textAlign = TextAlign.Center)
                                 Spacer(modifier = Modifier.height(12.dp))
                                 Button(
                                     onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) },
                                     colors = ButtonDefaults.buttonColors(containerColor = IOSBlue)
                                 ) {
-                                    Text("Enable Camera", color = Color.White, fontSize = 13.sp)
+                                    Text("Aktifkan Kamera", color = Color.White, fontSize = 13.sp)
                                 }
                             }
                         }
+                    }
+                }
+
+                // Live Photo Badge indicator
+                if (isLivePhotoOn) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = 12.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0x88000000))
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = "LIVE",
+                            color = IOSYellow,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp
+                        )
+                    }
+                }
+
+                // Timer Countdown Overlay
+                if (countdownSeconds > 0) {
+                    Box(
+                        modifier = Modifier
+                            .size(100.dp)
+                            .align(Alignment.Center)
+                            .clip(CircleShape)
+                            .background(Color(0x99000000)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "$countdownSeconds",
+                            color = Color.White,
+                            fontSize = 48.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                }
+
+                // Night Mode Long Exposure progress indicator
+                if (isCapturingNightMode) {
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color(0xCC000000))
+                            .padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        CircularProgressIndicator(
+                            color = IOSYellow,
+                            modifier = Modifier.size(36.dp),
+                            strokeWidth = 3.dp
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "HOLD STILL",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp
+                        )
                     }
                 }
 
@@ -300,6 +493,7 @@ fun CameraApp(
                                     } catch (e: Exception) {
                                         // Handled
                                     }
+                                    IOSFeedbackHelper.vibrateLight(context)
                                 },
                             contentAlignment = Alignment.Center
                         ) {
@@ -310,6 +504,124 @@ fun CameraApp(
                                 fontWeight = FontWeight.Bold
                             )
                         }
+                    }
+                }
+            }
+
+            // Quick Controls Drawer when chevron is tapped (iOS 18/26 drawer)
+            AnimatedVisibility(
+                visible = isControlsDrawerOpen,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color(0xFF222224))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Timer toggle
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (timerSetting > 0) Color(0x40FFCC00) else Color(0x20FFFFFF))
+                            .clickable {
+                                timerSetting = when (timerSetting) {
+                                    0 -> 3
+                                    3 -> 10
+                                    else -> 0
+                                }
+                                IOSFeedbackHelper.vibrateLight(context)
+                            }
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Timer,
+                            contentDescription = "Timer",
+                            tint = if (timerSetting > 0) IOSYellow else Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = if (timerSetting == 0) "Timer Off" else "${timerSetting}s",
+                            color = if (timerSetting > 0) IOSYellow else Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
+                    // Photographic Style selector
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0x20FFFFFF))
+                            .clickable {
+                                selectedStyle = when (selectedStyle) {
+                                    "Standard" -> "Vibrant"
+                                    "Vibrant" -> "Warm"
+                                    "Warm" -> "Cool"
+                                    "Cool" -> "Dramatic B&W"
+                                    else -> "Standard"
+                                }
+                                IOSFeedbackHelper.vibrateLight(context)
+                            }
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Tune,
+                            contentDescription = "Style",
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = selectedStyle,
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
+                    // Exposure Step
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (exposureCompensation != 0) Color(0x40FFCC00) else Color(0x20FFFFFF))
+                            .clickable {
+                                exposureCompensation = when (exposureCompensation) {
+                                    0 -> 1
+                                    1 -> 2
+                                    2 -> -1
+                                    -1 -> -2
+                                    else -> 0
+                                }
+                                try {
+                                    cameraControl?.setExposureCompensationIndex(exposureCompensation)
+                                } catch (e: Exception) {}
+                                IOSFeedbackHelper.vibrateLight(context)
+                            }
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Exposure,
+                            contentDescription = "Exposure",
+                            tint = if (exposureCompensation != 0) IOSYellow else Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = if (exposureCompensation > 0) "+$exposureCompensation EV" else "$exposureCompensation EV",
+                            color = if (exposureCompensation != 0) IOSYellow else Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                 }
             }
@@ -330,7 +642,10 @@ fun CameraApp(
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.sp,
-                        modifier = Modifier.clickable { selectedMode = mode }
+                        modifier = Modifier.clickable {
+                            selectedMode = mode
+                            IOSFeedbackHelper.vibrateLight(context)
+                        }
                     )
                 }
             }
@@ -343,7 +658,7 @@ fun CameraApp(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Left: Photo Gallery Thumbnail (shows the real latest photo snapped!)
+                // Left: Photo Gallery Thumbnail
                 Box(
                     modifier = Modifier
                         .size(54.dp)
@@ -383,7 +698,7 @@ fun CameraApp(
                     }
                 }
 
-                // Center: Big Circular White Shutter Button
+                // Center: Circular White Shutter Button
                 Box(
                     modifier = Modifier
                         .size(76.dp)
@@ -391,15 +706,9 @@ fun CameraApp(
                         .border(4.dp, Color.White, CircleShape)
                         .padding(4.dp)
                         .clip(CircleShape)
-                        .background(Color.White)
+                        .background(if (selectedMode == "VIDEO") Color(0xFFFF3B30) else Color.White)
                         .clickable {
-                            showFlashEffect = true
-                            takePhotoSafely(
-                                context = context,
-                                imageCapture = imageCapture,
-                                isCameraBound = isCameraBound,
-                                viewModel = viewModel
-                            )
+                            triggerShutter()
                         }
                 )
 
@@ -415,6 +724,7 @@ fun CameraApp(
                             } else {
                                 CameraSelector.DEFAULT_BACK_CAMERA
                             }
+                            IOSFeedbackHelper.vibrateLight(context)
                         },
                     contentAlignment = Alignment.Center
                 ) {
@@ -498,31 +808,57 @@ private fun takePhotoSafely(
     context: Context,
     imageCapture: ImageCapture?,
     isCameraBound: Boolean,
+    flashMode: IOSFlashMode,
+    isLivePhoto: Boolean,
+    photoFilter: String,
     viewModel: IOSViewModel
 ) {
     val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
     val photoDir = File(context.filesDir, "photos").apply { if (!exists()) mkdirs() }
     val photoFile = File(photoDir, "IMG_$timestamp.jpg")
 
+    val needPhysicalFlash = (flashMode == IOSFlashMode.ON)
+    if (needPhysicalFlash) {
+        FlashlightHelper.setTorch(context, true)
+    }
+
     if (imageCapture != null && isCameraBound) {
+        imageCapture.flashMode = when (flashMode) {
+            IOSFlashMode.ON -> ImageCapture.FLASH_MODE_ON
+            IOSFlashMode.AUTO -> ImageCapture.FLASH_MODE_AUTO
+            IOSFlashMode.OFF -> ImageCapture.FLASH_MODE_OFF
+        }
         val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
         imageCapture.takePicture(
             outputOptions,
             ContextCompat.getMainExecutor(context),
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
+                    if (needPhysicalFlash) {
+                        FlashlightHelper.setTorch(context, false)
+                    }
                     viewModel.addCapturedPhoto(photoFile.absolutePath)
+                    if (isLivePhoto) {
+                        viewModel.showDynamicIslandNotification("Camera", "Live Photo Disimpan", "camera", 0xFF34C759)
+                    }
                 }
 
                 override fun onError(exception: ImageCaptureException) {
-                    // Fallback to generating a real JPEG bitmap file
-                    generateAndSaveSnapshot(context, photoFile, timestamp, viewModel)
+                    if (needPhysicalFlash) {
+                        FlashlightHelper.setTorch(context, false)
+                    }
+                    generateAndSaveSnapshot(context, photoFile, timestamp, photoFilter, viewModel)
                 }
             }
         )
     } else {
-        // Fallback capture when camera hardware not active
-        generateAndSaveSnapshot(context, photoFile, timestamp, viewModel)
+        if (needPhysicalFlash) {
+            CoroutineScope(Dispatchers.Main).launch {
+                delay(300)
+                FlashlightHelper.setTorch(context, false)
+            }
+        }
+        generateAndSaveSnapshot(context, photoFile, timestamp, photoFilter, viewModel)
     }
 }
 
@@ -530,6 +866,7 @@ private fun generateAndSaveSnapshot(
     context: Context,
     targetFile: File,
     timestamp: String,
+    photoFilter: String,
     viewModel: IOSViewModel
 ) {
     try {
@@ -538,9 +875,15 @@ private fun generateAndSaveSnapshot(
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
 
-        // Draw camera frame with subtle gradient
+        // Draw camera frame with subtle gradient based on filter
         val paint = Paint().apply { isAntiAlias = true }
-        val colors = intArrayOf(0xFF1E293B.toInt(), 0xFF0F172A.toInt(), 0xFF0284C7.toInt())
+        val colors = when (photoFilter) {
+            "Vibrant" -> intArrayOf(0xFF0284C7.toInt(), 0xFF0D9488.toInt(), 0xFFF59E0B.toInt())
+            "Warm" -> intArrayOf(0xFF78350F.toInt(), 0xFFD97706.toInt(), 0xFFFDE68A.toInt())
+            "Cool" -> intArrayOf(0xFF1E3A8A.toInt(), 0xFF3B82F6.toInt(), 0xFF93C5FD.toInt())
+            "Dramatic B&W" -> intArrayOf(0xFF000000.toInt(), 0xFF333333.toInt(), 0xFF888888.toInt())
+            else -> intArrayOf(0xFF1E293B.toInt(), 0xFF0F172A.toInt(), 0xFF0284C7.toInt())
+        }
         val shader = android.graphics.LinearGradient(
             0f, 0f, 0f, height.toFloat(),
             colors, null, android.graphics.Shader.TileMode.CLAMP
@@ -551,12 +894,12 @@ private fun generateAndSaveSnapshot(
         // Draw viewfinder details & watermark
         paint.shader = null
         paint.color = android.graphics.Color.WHITE
-        paint.textSize = 48f
+        paint.textSize = 46f
         paint.textAlign = Paint.Align.CENTER
-        canvas.drawText("iPhone SE 2 Camera", width / 2f, height / 2f - 40f, paint)
+        canvas.drawText("iPhone Camera • $photoFilter", width / 2f, height / 2f - 40f, paint)
 
         paint.color = 0xFF94A3B8.toInt()
-        paint.textSize = 32f
+        paint.textSize = 30f
         canvas.drawText("Captured on $timestamp", width / 2f, height / 2f + 40f, paint)
 
         // Write to JPEG

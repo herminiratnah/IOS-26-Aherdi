@@ -7,6 +7,8 @@ import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
+import android.os.StatFs
 import android.provider.Settings
 import android.view.inputmethod.InputMethodManager
 import androidx.compose.animation.*
@@ -30,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -41,9 +44,16 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.example.R
 import com.example.service.IOSOverlayService
 import com.example.ui.theme.*
+import com.example.util.IOSFeedbackHelper
 import com.example.viewmodel.IOSViewModel
 
 enum class SettingsSubPage {
@@ -72,7 +82,17 @@ enum class SettingsSubPage {
     PRIVACY,
     SYSTEM_OVERLAY,
     DEFAULT_APPS,
-    APP_SETTINGS
+    APP_SETTINGS,
+    DATE_TIME,
+    LANGUAGE,
+    VPN,
+    RESET,
+    ACTION_BUTTON,
+    CAMERA_CONTROL,
+    STANDBY,
+    BACK_TAP,
+    DEVELOPER,
+    BATTERY_HEALTH
 }
 
 @Composable
@@ -718,6 +738,7 @@ fun BluetoothSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
 // 4. Cellular SubPage
 @Composable
 fun CellularSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
+    val context = LocalContext.current
     val cellularEnabled by viewModel.cellularEnabled.collectAsState()
     var dataRoaming by remember { mutableStateOf(false) }
     var voiceData by remember { mutableStateOf("5G Auto") }
@@ -759,6 +780,9 @@ fun CellularSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                             onCheckedChange = {
                                 dataRoaming = it
                                 viewModel.showDynamicIslandNotification("Data Roaming", if (it) "Roaming Enabled" else "Roaming Disabled", "cellular")
+                                kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                    com.example.util.RootExecutor.execute("settings put global data_roaming ${if (it) 1 else 0}")
+                                }
                             }
                         )
                         HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
@@ -772,6 +796,10 @@ fun CellularSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                                     else -> "5G Auto"
                                 }
                                 viewModel.showDynamicIslandNotification("Voice & Data", voiceData, "cellular")
+                                kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                    val mode = if (voiceData.contains("LTE")) 9 else 20
+                                    com.example.util.RootExecutor.execute("settings put global preferred_network_mode $mode")
+                                }
                             }
                         )
                         HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
@@ -795,8 +823,10 @@ fun CellularSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                         HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
                         IOSSettingsRow(title = "Carrier Services", detail = "Active")
                     }
-                    Spacer(modifier = Modifier.height(20.dp))
                 }
+            }
+            item {
+                Spacer(modifier = Modifier.height(20.dp))
             }
         }
     }
@@ -804,7 +834,33 @@ fun CellularSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
 
 // 5. General & About SubPage
 @Composable
-fun AboutSubPage(onBack: () -> Unit) {
+fun AboutSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val spoofedModel by viewModel.spoofedModel.collectAsState()
+    val retinaDpi by viewModel.retinaDpi.collectAsState()
+    val isRootAvailable by viewModel.isRootAvailable.collectAsState()
+
+    val totalApps = remember {
+        try {
+            context.packageManager.getInstalledApplications(0).size.toString()
+        } catch (e: Exception) {
+            "42"
+        }
+    }
+
+    val (capacityStr, availableStr) = remember {
+        try {
+            val statFs = StatFs(Environment.getDataDirectory().path)
+            val totalBytes = statFs.blockCountLong * statFs.blockSizeLong
+            val freeBytes = statFs.availableBlocksLong * statFs.blockSizeLong
+            val totalGb = String.format("%.1f GB", totalBytes / (1024.0 * 1024.0 * 1024.0))
+            val freeGb = String.format("%.1f GB", freeBytes / (1024.0 * 1024.0 * 1024.0))
+            Pair(totalGb, freeGb)
+        } catch (e: Exception) {
+            Pair("64.0 GB", "38.5 GB")
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -820,17 +876,21 @@ fun AboutSubPage(onBack: () -> Unit) {
         ) {
             item {
                 IOSSettingsCard {
-                    IOSSettingsRow(title = "Name", detail = "iPhone 17 Pro Max")
+                    IOSSettingsRow(title = "Name", detail = spoofedModel)
                     HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
-                    IOSSettingsRow(title = "iOS Version", detail = "18.5 (Build 22F82)")
+                    IOSSettingsRow(title = "iOS Version", detail = "26.2 (Build 22F82)")
                     HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
-                    IOSSettingsRow(title = "Model Name", detail = "iPhone 17 Pro Max")
+                    IOSSettingsRow(title = "Model Name", detail = spoofedModel)
                     HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
-                    IOSSettingsRow(title = "Model Number", detail = "A3102")
+                    IOSSettingsRow(title = "Physical Device", detail = "${Build.MANUFACTURER.uppercase()} ${Build.MODEL}")
                     HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
-                    IOSSettingsRow(title = "Serial Number", detail = "F2LZ982K0D")
+                    IOSSettingsRow(title = "Android Base", detail = "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
                     HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
-                    IOSSettingsRow(title = "Limited Warranty", detail = "Expires Oct 2027")
+                    IOSSettingsRow(title = "Screen Density", detail = "$retinaDpi DPI")
+                    HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
+                    IOSSettingsRow(title = "Root Privilege", detail = if (isRootAvailable) "Root #SU Active" else "Shell Standard")
+                    HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
+                    IOSSettingsRow(title = "Limited Warranty", detail = "AppleCare+ Active")
                 }
             }
 
@@ -842,45 +902,46 @@ fun AboutSubPage(onBack: () -> Unit) {
                     HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
                     IOSSettingsRow(title = "Photos", detail = "1,420")
                     HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
-                    IOSSettingsRow(title = "Applications", detail = "42")
+                    IOSSettingsRow(title = "Applications", detail = totalApps)
                     HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
-                    IOSSettingsRow(title = "Capacity", detail = "256 GB")
+                    IOSSettingsRow(title = "Capacity", detail = capacityStr)
                     HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
-                    IOSSettingsRow(title = "Available", detail = "184.2 GB")
+                    IOSSettingsRow(title = "Available", detail = availableStr)
                 }
             }
 
             item {
-                IOSSettingsCard {
-                    IOSSettingsRow(title = "Wi-Fi Address", detail = "A4:C3:61:9D:E4:2A")
-                    HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
-                    IOSSettingsRow(title = "Bluetooth", detail = "A4:C3:61:9D:E4:2B")
-                    HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
-                    IOSSettingsRow(title = "Modem Firmware", detail = "3.04.01")
-                    HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
-                    IOSSettingsRow(title = "SEID", detail = "0400827391823901")
-                }
                 Spacer(modifier = Modifier.height(20.dp))
             }
         }
     }
 }
 
-// 6. Sounds & Haptics SubPage (with REAL volume control and ringtone test!)
+// 6. Sounds & Haptics SubPage (Unified real volume control & system pipeline)
 @Composable
 fun SoundsSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
     val context = LocalContext.current
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager }
-    var volumeSlider by remember {
-        val current = audioManager?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 7
-        val max = audioManager?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: 15
-        mutableFloatStateOf(current.toFloat() / max.toFloat())
-    }
+    val volume by viewModel.volume.collectAsState()
 
     var selectedRingtone by remember { mutableStateOf("Reflection (Default)") }
-    var hapticsEnabled by remember { mutableStateOf(true) }
-    var lockSoundEnabled by remember { mutableStateOf(true) }
-    var keyboardClicks by remember { mutableStateOf(true) }
+    var currentPlayingRingtone by remember { mutableStateOf<android.media.Ringtone?>(null) }
+    var currentlyPlayingName by remember { mutableStateOf<String?>(null) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            try {
+                currentPlayingRingtone?.stop()
+            } catch (ignored: Exception) {}
+        }
+    }
+
+    var hapticsEnabled by remember { mutableStateOf(IOSFeedbackHelper.hapticsEnabled) }
+    var lockSoundEnabled by remember { mutableStateOf(IOSFeedbackHelper.soundsEnabled) }
+    var keyboardClicks by remember { mutableStateOf(IOSFeedbackHelper.soundsEnabled) }
+    var silentMode by remember {
+        mutableStateOf(audioManager?.ringerMode == AudioManager.RINGER_MODE_SILENT || audioManager?.ringerMode == AudioManager.RINGER_MODE_VIBRATE)
+    }
 
     val ringtones = listOf("Reflection (Default)", "Opening", "Chimes", "Apex", "Beacon", "Radiate", "Sencha")
 
@@ -911,15 +972,9 @@ fun SoundsSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                         ) {
                             Icon(Icons.Rounded.VolumeDown, contentDescription = null, tint = Color.Gray)
                             Slider(
-                                value = volumeSlider,
+                                value = volume,
                                 onValueChange = { newVal ->
-                                    volumeSlider = newVal
-                                    if (audioManager != null) {
-                                        val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                                        val target = (newVal * max).toInt()
-                                        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
-                                        viewModel.showDynamicIslandVolume((newVal * 100).toInt())
-                                    }
+                                    viewModel.setVolume(newVal, context)
                                 },
                                 modifier = Modifier.weight(1f),
                                 colors = SliderDefaults.colors(
@@ -930,6 +985,23 @@ fun SoundsSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                             Icon(Icons.Rounded.VolumeUp, contentDescription = null, tint = Color.Gray)
                         }
                     }
+                    HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
+                    IOSSettingsToggleRow(
+                        title = "Silent Mode (Hening)",
+                        checked = silentMode,
+                        onCheckedChange = { isSilent ->
+                            silentMode = isSilent
+                            try {
+                                audioManager?.ringerMode = if (isSilent) AudioManager.RINGER_MODE_SILENT else AudioManager.RINGER_MODE_NORMAL
+                            } catch (ignored: Exception) {}
+                            viewModel.showDynamicIslandNotification(
+                                title = if (isSilent) "Silent Mode On" else "Silent Mode Off",
+                                message = if (isSilent) "Ringer is silenced" else "Ringer is active",
+                                icon = if (isSilent) "bell.slash" else "bell",
+                                accent = if (isSilent) 0xFFFF3B30 else 0xFF34C759
+                            )
+                        }
+                    )
                 }
             }
 
@@ -940,25 +1012,67 @@ fun SoundsSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
             item {
                 IOSSettingsCard {
                     ringtones.forEachIndexed { idx, ringtone ->
+                        val isPlaying = currentlyPlayingName == ringtone
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
                                     selectedRingtone = ringtone
-                                    try {
-                                        val defaultUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-                                        val r = RingtoneManager.getRingtone(context, defaultUri)
-                                        r.play()
-                                    } catch (ignored: Exception) {}
-                                    viewModel.showDynamicIslandNotification("Ringtone Preview", ringtone, "music")
+                                    if (isPlaying) {
+                                        // Stop playing if already active
+                                        try {
+                                            currentPlayingRingtone?.stop()
+                                        } catch (ignored: Exception) {}
+                                        currentPlayingRingtone = null
+                                        currentlyPlayingName = null
+                                    } else {
+                                        // Stop previously playing ringtone
+                                        try {
+                                            currentPlayingRingtone?.stop()
+                                        } catch (ignored: Exception) {}
+                                        try {
+                                            val defaultUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+                                            val r = RingtoneManager.getRingtone(context, defaultUri)
+                                            r.play()
+                                            currentPlayingRingtone = r
+                                            currentlyPlayingName = ringtone
+                                            viewModel.showDynamicIslandNotification("Ringtone Preview", ringtone, "music")
+                                        } catch (ignored: Exception) {}
+                                    }
                                 }
                                 .padding(horizontal = 16.dp, vertical = 13.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(ringtone, fontSize = 16.sp, color = Color.Black)
-                            if (selectedRingtone == ringtone) {
-                                Icon(Icons.Rounded.Check, contentDescription = null, tint = Color(0xFF007AFF), modifier = Modifier.size(20.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                if (isPlaying) {
+                                    Icon(
+                                        Icons.Rounded.GraphicEq,
+                                        contentDescription = "Playing",
+                                        tint = Color(0xFF007AFF),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                Text(
+                                    ringtone,
+                                    fontSize = 16.sp,
+                                    color = if (isPlaying) Color(0xFF007AFF) else Color.Black,
+                                    fontWeight = if (isPlaying) FontWeight.SemiBold else FontWeight.Normal
+                                )
+                            }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                if (isPlaying) {
+                                    Text("Hentikan", fontSize = 12.sp, color = Color.Gray)
+                                }
+                                if (selectedRingtone == ringtone) {
+                                    Icon(Icons.Rounded.Check, contentDescription = null, tint = Color(0xFF007AFF), modifier = Modifier.size(20.dp))
+                                }
                             }
                         }
                         if (idx < ringtones.size - 1) {
@@ -973,21 +1087,36 @@ fun SoundsSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                     IOSSettingsToggleRow(
                         title = "Keyboard Feedback (Clicks)",
                         checked = keyboardClicks,
-                        onCheckedChange = { keyboardClicks = it }
+                        onCheckedChange = {
+                            keyboardClicks = it
+                            IOSFeedbackHelper.soundsEnabled = it
+                            if (it) IOSFeedbackHelper.playClickSound(context)
+                        }
                     )
                     HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
                     IOSSettingsToggleRow(
                         title = "Lock Sound",
                         checked = lockSoundEnabled,
-                        onCheckedChange = { lockSoundEnabled = it }
+                        onCheckedChange = {
+                            lockSoundEnabled = it
+                            IOSFeedbackHelper.soundsEnabled = it
+                            if (it) IOSFeedbackHelper.playLockSound(context)
+                        }
                     )
                     HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
                     IOSSettingsToggleRow(
                         title = "System Haptics",
                         checked = hapticsEnabled,
-                        onCheckedChange = { hapticsEnabled = it }
+                        onCheckedChange = {
+                            hapticsEnabled = it
+                            IOSFeedbackHelper.hapticsEnabled = it
+                            if (it) IOSFeedbackHelper.vibrateLight(context)
+                        }
                     )
                 }
+            }
+
+            item {
                 Spacer(modifier = Modifier.height(20.dp))
             }
         }
@@ -1041,21 +1170,23 @@ fun SystemOverlaySubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
             }
 
             item {
-                Button(
-                    onClick = {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                            val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
-                                data = Uri.parse("package:${context.packageName}")
-                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                IOSSettingsCard {
+                    IOSSettingsRow(
+                        title = "Aktifkan Izin System Overlay Langsung",
+                        detail = "Pipeline Root",
+                        icon = Icons.Rounded.Security,
+                        iconBg = Color(0xFF34C759),
+                        onClick = {
+                            kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                com.example.util.RootExecutor.execute("appops set ${context.packageName} SYSTEM_ALERT_WINDOW allow")
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                    isOverlayActive = true
+                                    IOSOverlayService.start(context)
+                                    viewModel.showDynamicIslandNotification("Dynamic Island", "Izin Overlay Aktif via System Pipeline", "shield", 0xFF34C759)
+                                }
                             }
-                            context.startActivity(intent)
                         }
-                    },
-                    modifier = Modifier.fillMaxWidth().height(48.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF5856D6))
-                ) {
-                    Text("Beri Izin 'Tampil di Atas Aplikasi Lain'", fontWeight = FontWeight.Bold, color = Color.White)
+                    )
                 }
                 Spacer(modifier = Modifier.height(20.dp))
             }
@@ -1103,37 +1234,21 @@ fun KeyboardSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
             }
 
             item {
-                Button(
-                    onClick = {
-                        try {
-                            val intent = Intent(Settings.ACTION_INPUT_METHOD_SETTINGS).apply {
-                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                IOSSettingsCard {
+                    IOSSettingsRow(
+                        title = "Aktifkan iOS Keyboard ke Sistem",
+                        detail = "Pipeline Langsung",
+                        icon = Icons.Rounded.Keyboard,
+                        iconBg = Color(0xFF007AFF),
+                        onClick = {
+                            kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                com.example.util.RootExecutor.execute("ime enable ${context.packageName}/.service.IOSKeyboardService && ime set ${context.packageName}/.service.IOSKeyboardService")
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                    viewModel.showDynamicIslandNotification("Keyboard", "iOS Keyboard Diaktifkan", "keyboard", 0xFF007AFF)
+                                }
                             }
-                            context.startActivity(intent)
-                        } catch (e: Exception) {
-                            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-                            imm?.showInputMethodPicker()
                         }
-                    },
-                    modifier = Modifier.fillMaxWidth().height(48.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF007AFF))
-                ) {
-                    Text("Aktifkan iOS Keyboard di Sistem Android", fontWeight = FontWeight.Bold, color = Color.White)
-                }
-            }
-
-            item {
-                Button(
-                    onClick = {
-                        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-                        imm?.showInputMethodPicker()
-                    },
-                    modifier = Modifier.fillMaxWidth().height(48.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF34C759))
-                ) {
-                    Text("Pilih iOS Keyboard Sebagai Default", fontWeight = FontWeight.Bold, color = Color.White)
+                    )
                 }
                 Spacer(modifier = Modifier.height(20.dp))
             }
@@ -1175,22 +1290,6 @@ fun DefaultAppsSubPage(onBack: () -> Unit) {
             }
 
             item {
-                Button(
-                    onClick = {
-                        try {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                                context.startActivity(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS).apply {
-                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                                })
-                            }
-                        } catch (ignored: Exception) {}
-                    },
-                    modifier = Modifier.fillMaxWidth().height(48.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF007AFF))
-                ) {
-                    Text("Kelola Default Apps di Sistem Android", fontWeight = FontWeight.Bold, color = Color.White)
-                }
                 Spacer(modifier = Modifier.height(20.dp))
             }
         }
@@ -1199,7 +1298,7 @@ fun DefaultAppsSubPage(onBack: () -> Unit) {
 
 // 10. Battery SubPage (Real Battery Level & Low Power Mode)
 @Composable
-fun BatterySubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
+fun BatterySubPage(viewModel: IOSViewModel, onNavigate: (SettingsSubPage) -> Unit = {}, onBack: () -> Unit) {
     val batteryLevel by viewModel.batteryLevel.collectAsState()
     val isCharging by viewModel.isBatteryCharging.collectAsState()
     var lowPowerMode by remember { mutableStateOf(false) }
@@ -1241,7 +1340,13 @@ fun BatterySubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
 
             item {
                 IOSSettingsCard {
-                    IOSSettingsRow(title = "Battery Health & Charging", detail = "Maximum Capacity 98% (Normal)", icon = Icons.Rounded.HealthAndSafety, iconBg = Color(0xFF34C759))
+                    IOSSettingsRow(
+                        title = "Battery Health & Charging",
+                        detail = "Maximum Capacity 98% (Normal)",
+                        icon = Icons.Rounded.HealthAndSafety,
+                        iconBg = Color(0xFF34C759),
+                        onClick = { onNavigate(SettingsSubPage.BATTERY_HEALTH) }
+                    )
                 }
             }
 
@@ -1281,9 +1386,36 @@ fun BatterySubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
 // 11. General SubPage
 @Composable
 fun GeneralSubPage(
+    viewModel: IOSViewModel,
     onNavigate: (SettingsSubPage) -> Unit,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
+    var showShutdownDialog by remember { mutableStateOf(false) }
+
+    if (showShutdownDialog) {
+        AlertDialog(
+            onDismissRequest = { showShutdownDialog = false },
+            title = { Text("Matikan Perangkat", fontWeight = FontWeight.Bold) },
+            text = { Text("Apakah Anda yakin ingin mematikan perangkat ini?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showShutdownDialog = false
+                        viewModel.powerOffRoot()
+                    }
+                ) {
+                    Text("Matikan (Shut Down)", color = Color(0xFFFF3B30), fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showShutdownDialog = false }) {
+                    Text("Batal")
+                }
+            }
+        )
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1301,7 +1433,7 @@ fun GeneralSubPage(
                 IOSSettingsCard {
                     IOSSettingsRow(title = "About", detail = "iPhone 17 Pro Max", onClick = { onNavigate(SettingsSubPage.ABOUT) })
                     HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
-                    IOSSettingsRow(title = "Software Update", detail = "iOS 18.5", onClick = { onNavigate(SettingsSubPage.SOFTWARE_UPDATE) })
+                    IOSSettingsRow(title = "Software Update", detail = "iOS 26.2", onClick = { onNavigate(SettingsSubPage.SOFTWARE_UPDATE) })
                 }
             }
 
@@ -1319,7 +1451,7 @@ fun GeneralSubPage(
 
             item {
                 IOSSettingsCard {
-                    IOSSettingsRow(title = "iPhone Storage", detail = "184 GB Available", onClick = { onNavigate(SettingsSubPage.STORAGE) })
+                    IOSSettingsRow(title = "iPhone Storage", detail = "Storage Overview", onClick = { onNavigate(SettingsSubPage.STORAGE) })
                     HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
                     IOSSettingsRow(title = "Background App Refresh", detail = "On")
                 }
@@ -1327,27 +1459,45 @@ fun GeneralSubPage(
 
             item {
                 IOSSettingsCard {
-                    IOSSettingsRow(title = "Date & Time", detail = "24-Hour Time (Auto)")
+                    IOSSettingsRow(
+                        title = "Date & Time",
+                        detail = "Auto",
+                        onClick = { onNavigate(SettingsSubPage.DATE_TIME) }
+                    )
                     HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
-                    IOSSettingsRow(title = "Keyboard", detail = "2 Keyboards", onClick = { onNavigate(SettingsSubPage.KEYBOARD) })
+                    IOSSettingsRow(title = "Keyboard", detail = "iOS Keyboard", onClick = { onNavigate(SettingsSubPage.KEYBOARD) })
                     HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
-                    IOSSettingsRow(title = "Language & Region", detail = "English (US)")
-                    HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
-                    IOSSettingsRow(title = "Dictionary", detail = "")
+                    IOSSettingsRow(
+                        title = "Language & Region",
+                        detail = "Indonesian / English",
+                        onClick = { onNavigate(SettingsSubPage.LANGUAGE) }
+                    )
                 }
             }
 
             item {
                 IOSSettingsCard {
-                    IOSSettingsRow(title = "VPN & Device Management", detail = "Not Connected")
+                    IOSSettingsRow(
+                        title = "VPN & Device Management",
+                        detail = "Not Connected",
+                        onClick = { onNavigate(SettingsSubPage.VPN) }
+                    )
                 }
             }
 
             item {
                 IOSSettingsCard {
-                    IOSSettingsRow(title = "Transfer or Reset iPhone", detail = "")
+                    IOSSettingsRow(
+                        title = "Transfer or Reset iPhone",
+                        detail = "",
+                        onClick = { onNavigate(SettingsSubPage.RESET) }
+                    )
                     HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
-                    IOSSettingsRow(title = "Shut Down", detail = "", onClick = {})
+                    IOSSettingsRow(
+                        title = "Shut Down",
+                        detail = "",
+                        onClick = { showShutdownDialog = true }
+                    )
                 }
                 Spacer(modifier = Modifier.height(20.dp))
             }
@@ -1355,15 +1505,310 @@ fun GeneralSubPage(
     }
 }
 
-// 12. Display & Brightness SubPage
+// Dedicated Storage SubPage with real system storage analysis
+@Composable
+fun StorageSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val installedApps by viewModel.installedApps.collectAsState()
+
+    val (usedGb, totalGb, freeGb) = remember {
+        try {
+            val statFs = StatFs(Environment.getDataDirectory().path)
+            val totalBytes = statFs.blockCountLong * statFs.blockSizeLong
+            val freeBytes = statFs.availableBlocksLong * statFs.blockSizeLong
+            val usedBytes = (totalBytes - freeBytes).coerceAtLeast(0L)
+            Triple(
+                usedBytes / (1024.0 * 1024.0 * 1024.0),
+                totalBytes / (1024.0 * 1024.0 * 1024.0),
+                freeBytes / (1024.0 * 1024.0 * 1024.0)
+            )
+        } catch (e: Exception) {
+            Triple(28.4, 64.0, 35.6)
+        }
+    }
+
+    val usedFraction = (usedGb / totalGb.coerceAtLeast(1.0)).toFloat().coerceIn(0.05f, 1f)
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(IOSSystemGray6)
+    ) {
+        SettingsTopBar(title = "iPhone Storage", onBack = onBack)
+
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            item {
+                IOSSettingsCard {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.Bottom
+                        ) {
+                            Text(
+                                text = String.format("%.1f GB of %.0f GB Used", usedGb, totalGb),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp,
+                                color = Color.Black
+                            )
+                            Text(
+                                text = String.format("%.1f GB Free", freeGb),
+                                fontSize = 13.sp,
+                                color = Color(0xFF34C759),
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        // iOS-style storage color bar
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(14.dp)
+                                .clip(RoundedCornerShape(7.dp))
+                                .background(Color(0xFFE5E5EA))
+                        ) {
+                            // Apps (Red/Orange)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .weight(0.45f * usedFraction)
+                                    .background(Color(0xFFFF3B30))
+                            )
+                            // System (Gray)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .weight(0.25f * usedFraction)
+                                    .background(Color(0xFF8E8E93))
+                            )
+                            // Photos/Media (Yellow)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .weight(0.15f * usedFraction)
+                                    .background(Color(0xFFFFCC00))
+                            )
+                            // Cache & Others (Blue)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .weight(0.15f * usedFraction)
+                                    .background(Color(0xFF007AFF))
+                            )
+                            // Free remaining
+                            if (usedFraction < 0.98f) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxHeight()
+                                        .weight(1f - usedFraction)
+                                        .background(Color(0xFFE5E5EA))
+                                )
+                            }
+                        }
+
+                        // Legend
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(Color(0xFFFF3B30)))
+                                Text("Apps", fontSize = 11.sp, color = Color.Gray)
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(Color(0xFF8E8E93)))
+                                Text("System", fontSize = 11.sp, color = Color.Gray)
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(Color(0xFFFFCC00)))
+                                Text("Media", fontSize = 11.sp, color = Color.Gray)
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(Color(0xFF007AFF)))
+                                Text("Other", fontSize = 11.sp, color = Color.Gray)
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                Text("OPTIMIZATION & TOOLS", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Gray, modifier = Modifier.padding(start = 8.dp))
+            }
+
+            item {
+                IOSSettingsCard {
+                    IOSSettingsRow(
+                        title = "Bersihkan RAM & Cache Memori (Root)",
+                        detail = "Clean Cache",
+                        icon = Icons.Rounded.Speed,
+                        iconBg = Color(0xFF34C759),
+                        onClick = {
+                            viewModel.cleanJ2PrimeRamRoot()
+                        }
+                    )
+                }
+            }
+
+            item {
+                Text("INSTALLED APPLICATIONS (${installedApps.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Gray, modifier = Modifier.padding(start = 8.dp))
+            }
+
+            item {
+                IOSSettingsCard {
+                    installedApps.take(15).forEachIndexed { idx, app ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                        com.example.util.RootExecutor.execute("pm clear ${app.packageName} || rm -rf /data/data/${app.packageName}/cache/*")
+                                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                            viewModel.showDynamicIslandNotification(app.appName, "Cache berhasil dibersihkan", "trash", 0xFF007AFF)
+                                        }
+                                    }
+                                }
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                if (app.iconBitmap != null) {
+                                    Image(
+                                        bitmap = app.iconBitmap.asImageBitmap(),
+                                        contentDescription = app.appName,
+                                        modifier = Modifier.size(32.dp).clip(RoundedCornerShape(8.dp))
+                                    )
+                                } else {
+                                    Box(
+                                        modifier = Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFF007AFF)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(app.appName.take(1), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                    }
+                                }
+                                Column {
+                                    Text(app.appName, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = Color.Black)
+                                    Text(app.packageName, fontSize = 11.sp, color = Color.Gray)
+                                }
+                            }
+                            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null, tint = Color(0xFFC7C7CC), modifier = Modifier.size(18.dp))
+                        }
+                        if (idx < installedApps.take(15).size - 1) {
+                            HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+            }
+        }
+    }
+}
+
+// Dedicated Software Update SubPage
+@Composable
+fun SoftwareUpdateSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
+    val context = LocalContext.current
+    var autoUpdates by remember { mutableStateOf(true) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(IOSSystemGray6)
+    ) {
+        SettingsTopBar(title = "Software Update", onBack = onBack)
+
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            item {
+                IOSSettingsCard {
+                    IOSSettingsToggleRow(
+                        title = "Automatic Updates",
+                        checked = autoUpdates,
+                        onCheckedChange = { autoUpdates = it },
+                        icon = Icons.Rounded.Sync,
+                        iconBg = Color(0xFF34C759)
+                    )
+                }
+            }
+
+            item {
+                IOSSettingsCard {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.CheckCircle,
+                            contentDescription = null,
+                            tint = Color(0xFF34C759),
+                            modifier = Modifier.size(54.dp)
+                        )
+                        Text("iOS 26.2", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                        Text("Your iPhone is up to date with the latest features and security enhancements.", fontSize = 14.sp, color = Color.Gray, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    }
+                }
+            }
+
+            item {
+                var isChecking by remember { mutableStateOf(false) }
+                IOSSettingsCard {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = !isChecking) {
+                                isChecking = true
+                                kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+                                    kotlinx.coroutines.delay(1500)
+                                    isChecking = false
+                                    viewModel.showDynamicIslandNotification("Software Update", "iOS 26.2 is up to date", "checkmark.circle", 0xFF34C759)
+                                }
+                            }
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (isChecking) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = Color(0xFF007AFF),
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text("Checking for Update...", color = Color(0xFF007AFF), fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                        } else {
+                            Text("Check for Updates", color = Color(0xFF007AFF), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+            }
+        }
+    }
+}
+
+// 12. Display & Brightness SubPage (Direct pipeline to system & window brightness)
 @Composable
 fun DisplaySubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
+    val context = LocalContext.current
     val isDarkMode by viewModel.isDarkMode.collectAsState()
+    val brightness by viewModel.brightness.collectAsState()
     var trueTone by remember { mutableStateOf(true) }
     var nightShift by remember { mutableStateOf(false) }
     var autoLock by remember { mutableStateOf("30 Seconds") }
     var alwaysOn by remember { mutableStateOf(true) }
-    var brightness by remember { mutableFloatStateOf(0.75f) }
 
     Column(
         modifier = Modifier
@@ -1444,7 +1889,9 @@ fun DisplaySubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                             Icon(Icons.Rounded.BrightnessLow, contentDescription = null, tint = Color.Gray)
                             Slider(
                                 value = brightness,
-                                onValueChange = { brightness = it },
+                                onValueChange = { newVal ->
+                                    viewModel.setBrightness(newVal, context)
+                                },
                                 modifier = Modifier.weight(1f),
                                 colors = SliderDefaults.colors(
                                     thumbColor = Color.White,
@@ -1474,6 +1921,9 @@ fun DisplaySubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                     HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
                     IOSSettingsToggleRow(title = "Always On Display", checked = alwaysOn, onCheckedChange = { alwaysOn = it })
                 }
+            }
+
+            item {
                 Spacer(modifier = Modifier.height(20.dp))
             }
         }
@@ -1483,6 +1933,7 @@ fun DisplaySubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
 // 13. Personal Hotspot SubPage
 @Composable
 fun PersonalHotspotSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
+    val context = LocalContext.current
     val hotspotEnabled by viewModel.hotspotEnabled.collectAsState()
     var password by remember { mutableStateOf("ios26_hotspot") }
     var maxCompatibility by remember { mutableStateOf(true) }
@@ -1583,12 +2034,14 @@ fun PersonalHotspotSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
     }
 }
 
-// 14. iOS 17 Style Wallpaper SubPage
+// 14. iOS 26 Style Wallpaper SubPage
 data class WallpaperChoice(
     val id: String,
     val name: String,
     val category: String,
-    val resId: Int
+    val resId: Int,
+    val hasDepthEffect: Boolean = false,
+    val depthTheme: String = "none"
 )
 
 @Composable
@@ -1597,6 +2050,8 @@ fun WallpaperSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
     val currentWallpaperRes by viewModel.currentWallpaperRes.collectAsState()
     val currentWallpaperName by viewModel.currentWallpaperName.collectAsState()
     val currentWallpaperUri by viewModel.currentWallpaperUri.collectAsState()
+    val lockScreenConfig by viewModel.lockScreenConfig.collectAsState()
+    val currentTime by viewModel.currentTimeFormatted.collectAsState()
 
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -1608,18 +2063,24 @@ fun WallpaperSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                 uri = uri.toString(),
                 context = context
             )
+            viewModel.updateLockScreenConfig { it.copy(wallpaperId = "custom") }
         }
     }
 
     val wallpapers = remember {
         listOf(
+            WallpaperChoice("mountain_depth", "Alpine Mountain Peak", "iOS 26 Depth Effect", R.drawable.wallpaper_mountain_depth, hasDepthEffect = true, depthTheme = "mountain"),
+            WallpaperChoice("planet_depth", "Celestial Horizon", "iOS 26 Depth Effect", R.drawable.wallpaper_planet_depth, hasDepthEffect = true, depthTheme = "planet"),
+            WallpaperChoice("dune_depth", "Dune Twilight", "iOS 26 Depth Effect", R.drawable.wallpaper_dune, hasDepthEffect = true, depthTheme = "dune"),
+            WallpaperChoice("skyline_depth", "Cyber Metropolis", "iOS 26 Depth Effect", R.drawable.wallpaper_neon_waves, hasDepthEffect = true, depthTheme = "skyline"),
+            WallpaperChoice("glass_depth", "Ambient Prism Ribbon", "iOS 26 Depth Effect", R.drawable.wallpaper_geometry, hasDepthEffect = true, depthTheme = "glass_ribbon"),
             WallpaperChoice("ios26", "iOS 26 Ambient", "Featured", R.drawable.ios26_wallpaper),
             WallpaperChoice("titanium", "iOS 18 Pro Titanium", "Flagship", R.drawable.wallpaper_titanium),
             WallpaperChoice("twilight", "Twilight Gradient", "Fluid Abstract", R.drawable.wallpaper_twilight),
             WallpaperChoice("astronomy", "Astronomy & Earth", "Astronomy", R.drawable.wallpaper_astronomy),
             WallpaperChoice("aurora", "Aurora Fjord", "Nature", R.drawable.wallpaper_aurora),
             WallpaperChoice("alpine", "Alpine Vista", "Nature", R.drawable.wallpaper_alpine),
-            WallpaperChoice("neon", "Neon Fluid Wave", "Abstract", R.drawable.wallpaper_neon_waves),
+            WallpaperChoice("deep_space", "Cosmic Nebula", "Astronomy", R.drawable.wallpaper_deep_space),
             WallpaperChoice("valley", "Monument Sunset", "Collections", R.drawable.monument_valley_art),
             WallpaperChoice("nature", "Emerald Forest", "Nature", R.drawable.photo_widget_nature)
         )
@@ -1649,53 +2110,39 @@ fun WallpaperSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Lock Screen Mini Mockup
+                    // Lock Screen Mini Mockup (with Depth Effect rendering!)
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Box(
                             modifier = Modifier
-                                .width(120.dp)
-                                .height(210.dp)
+                                .width(125.dp)
+                                .height(220.dp)
                                 .clip(RoundedCornerShape(20.dp))
                                 .background(Color.Black)
                         ) {
-                            if (!currentWallpaperUri.isNullOrBlank()) {
-                                AsyncImage(
-                                    model = currentWallpaperUri,
-                                    contentDescription = "Lock Screen Wallpaper",
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            } else {
-                                Image(
-                                    painter = painterResource(id = if (currentWallpaperRes != 0) currentWallpaperRes else R.drawable.ios26_wallpaper),
-                                    contentDescription = "Lock Screen Wallpaper",
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
-                            // Clock overlay
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 24.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Text("Tuesday, Sep 8", color = Color.White.copy(alpha = 0.85f), fontSize = 9.sp, fontWeight = FontWeight.Medium)
-                                Text("09:41", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-                            }
-                            // Bottom quick buttons
+                            com.example.ui.components.IOSDepthWallpaperRenderer(
+                                config = lockScreenConfig,
+                                wallpaperRes = currentWallpaperRes,
+                                wallpaperUri = currentWallpaperUri,
+                                currentTime = currentTime,
+                                currentDate = "Tuesday, Sep 8",
+                                batteryLevel = 90,
+                                isBatteryCharging = false,
+                                modifier = Modifier.fillMaxSize()
+                            )
+
+                            // Bottom quick buttons overlay
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .align(Alignment.BottomCenter)
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    .padding(horizontal = 10.dp, vertical = 10.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Box(modifier = Modifier.size(20.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.5f)), contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Rounded.FlashlightOn, contentDescription = null, tint = Color.White, modifier = Modifier.size(11.dp))
+                                Box(modifier = Modifier.size(22.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.5f)), contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Rounded.FlashlightOn, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
                                 }
-                                Box(modifier = Modifier.size(20.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.5f)), contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Rounded.CameraAlt, contentDescription = null, tint = Color.White, modifier = Modifier.size(11.dp))
+                                Box(modifier = Modifier.size(22.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.5f)), contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Rounded.CameraAlt, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
                                 }
                             }
                         }
@@ -1709,8 +2156,8 @@ fun WallpaperSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Box(
                             modifier = Modifier
-                                .width(120.dp)
-                                .height(210.dp)
+                                .width(125.dp)
+                                .height(220.dp)
                                 .clip(RoundedCornerShape(20.dp))
                                 .background(Color.Black)
                         ) {
@@ -1723,7 +2170,7 @@ fun WallpaperSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                                 )
                             } else {
                                 Image(
-                                    painter = painterResource(id = if (currentWallpaperRes != 0) currentWallpaperRes else R.drawable.ios26_wallpaper),
+                                    painter = painterResource(id = if (currentWallpaperRes != 0) currentWallpaperRes else R.drawable.wallpaper_mountain_depth),
                                     contentDescription = "Home Screen Wallpaper",
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier.fillMaxSize()
@@ -1770,6 +2217,88 @@ fun WallpaperSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                         }
                         Spacer(modifier = Modifier.height(6.dp))
                         Text("Home Screen", fontSize = 12.sp, color = Color.Gray, fontWeight = FontWeight.Medium)
+                    }
+                }
+            }
+
+            // Depth Effect & Customizer Card
+            item {
+                IOSSettingsCard {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color(0xFF007AFF)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Layers,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                Column {
+                                    Text(
+                                        text = "Depth Effect (Efek Kedalaman)",
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color.Black
+                                    )
+                                    Text(
+                                        text = "Jam di balik gunung / horizon wallpaper",
+                                        fontSize = 12.sp,
+                                        color = Color.Gray
+                                    )
+                                }
+                            }
+
+                            Switch(
+                                checked = lockScreenConfig.depthEffectEnabled,
+                                onCheckedChange = { isChecked ->
+                                    viewModel.updateLockScreenConfig { it.copy(depthEffectEnabled = isChecked) }
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = Color(0xFF34C759)
+                                )
+                            )
+                        }
+
+                        HorizontalDivider(color = Color.LightGray.copy(alpha = 0.3f))
+
+                        Button(
+                            onClick = {
+                                viewModel.openLockScreenCustomize()
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF007AFF))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.AutoAwesome,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Customize Fonts, Colors & Widgets", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        }
                     }
                 }
             }
@@ -1826,7 +2355,7 @@ fun WallpaperSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
             }
 
             item {
-                Text("WALLPAPER GALLERY", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Gray, modifier = Modifier.padding(start = 8.dp))
+                Text("WALLPAPER GALLERY (iOS 26 Depth & Classics)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Gray, modifier = Modifier.padding(start = 8.dp))
             }
 
             // Wallpapers Collection Cards
@@ -1839,6 +2368,17 @@ fun WallpaperSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                             .clickable {
                                 selectedWallpaper = wall
                                 viewModel.setWallpaper(wall.resId, wall.name, null, context)
+                                if (wall.hasDepthEffect) {
+                                    viewModel.updateLockScreenConfig {
+                                        it.copy(
+                                            depthEffectEnabled = true,
+                                            depthTheme = wall.depthTheme,
+                                            wallpaperId = wall.id
+                                        )
+                                    }
+                                } else {
+                                    viewModel.updateLockScreenConfig { it.copy(wallpaperId = wall.id) }
+                                }
                             }
                             .padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -1854,18 +2394,38 @@ fun WallpaperSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                         )
 
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = wall.name,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color.Black
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = wall.name,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color.Black
+                                )
+                            }
                             Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = wall.category,
-                                fontSize = 13.sp,
-                                color = Color.Gray
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                if (wall.hasDepthEffect) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(Color(0xFF007AFF).copy(alpha = 0.12f))
+                                            .padding(horizontal = 5.dp, vertical = 1.dp)
+                                    ) {
+                                        Text("✨ Depth Effect", color = Color(0xFF007AFF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                                Text(
+                                    text = wall.category,
+                                    fontSize = 12.sp,
+                                    color = Color.Gray
+                                )
+                            }
                             if (isCurrent) {
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Box(
@@ -1891,6 +2451,17 @@ fun WallpaperSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                                 onClick = {
                                     selectedWallpaper = wall
                                     viewModel.setWallpaper(wall.resId, wall.name, null, context)
+                                    if (wall.hasDepthEffect) {
+                                        viewModel.updateLockScreenConfig {
+                                            it.copy(
+                                                depthEffectEnabled = true,
+                                                depthTheme = wall.depthTheme,
+                                                wallpaperId = wall.id
+                                            )
+                                        }
+                                    } else {
+                                        viewModel.updateLockScreenConfig { it.copy(wallpaperId = wall.id) }
+                                    }
                                 },
                                 shape = RoundedCornerShape(14.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF007AFF)),
@@ -1918,6 +2489,7 @@ fun AccessibilitySubPage(
     onNavigate: (SettingsSubPage) -> Unit,
     onBack: () -> Unit
 ) {
+    val backTapEnabled by viewModel.backTapEnabled.collectAsState()
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1954,6 +2526,14 @@ fun AccessibilitySubPage(
             item {
                 IOSSettingsCard {
                     IOSSettingsRow(title = "Touch", detail = "Haptic Touch Fast", icon = Icons.Rounded.TouchApp, iconBg = Color(0xFF007AFF))
+                    HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
+                    IOSSettingsRow(
+                        title = "Back Tap (Ketuk Belakang)",
+                        detail = if (backTapEnabled) "Nyala" else "Mati",
+                        icon = Icons.Rounded.TouchApp,
+                        iconBg = Color(0xFF007AFF),
+                        onClick = { onNavigate(SettingsSubPage.BACK_TAP) }
+                    )
                     HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
                     IOSSettingsRow(title = "Face ID & Attention", detail = "On", icon = Icons.Rounded.Face, iconBg = Color(0xFF34C759))
                     HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
@@ -2001,6 +2581,7 @@ fun AccessibilitySubPage(
 // 16. Face ID & Passcode SubPage
 @Composable
 fun FaceIdPasscodeSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
+    val context = LocalContext.current
     val isPasscodeEnabled by viewModel.isPasscodeEnabled.collectAsState()
     val isFaceIdEnabled by viewModel.isFaceIdEnabled.collectAsState()
     var showChangePasscodeDialog by remember { mutableStateOf(false) }
@@ -2245,6 +2826,20 @@ fun EmergencySosSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                         detail = "",
                         icon = Icons.Rounded.Favorite,
                         iconBg = Color(0xFFFF2D55)
+                    )
+                }
+            }
+
+            item {
+                IOSSettingsCard {
+                    IOSSettingsRow(
+                        title = "Emergency SOS Call (112)",
+                        detail = "Call",
+                        icon = Icons.Rounded.Phone,
+                        iconBg = Color(0xFFFF3B30),
+                        onClick = {
+                            viewModel.startInAppCall("Emergency SOS", "112")
+                        }
                     )
                 }
                 Spacer(modifier = Modifier.height(20.dp))
@@ -2791,5 +3386,739 @@ fun AppSettingsSubPage(
         }
     }
 }
+
+// 21. Date & Time SubPage (Native iOS with direct system pipeline)
+@Composable
+fun DateTimeSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
+    var is24Hour by remember { mutableStateOf(true) }
+    var autoTime by remember { mutableStateOf(true) }
+    var timeZone by remember { mutableStateOf("Jakarta (WIB • GMT+7)") }
+    var showTimeZonePicker by remember { mutableStateOf(false) }
+
+    val timeZones = listOf(
+        "Jakarta (WIB • GMT+7)",
+        "Makassar (WITA • GMT+8)",
+        "Jayapura (WIT • GMT+9)",
+        "Singapore (SGT • GMT+8)",
+        "Tokyo (JST • GMT+9)",
+        "London (GMT+0)",
+        "New York (EST • GMT-5)",
+        "Cupertino (PST • GMT-8)"
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(IOSSystemGray6)
+    ) {
+        SettingsTopBar(title = "Date & Time", onBack = onBack)
+
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            item {
+                IOSSettingsCard {
+                    IOSSettingsToggleRow(
+                        title = "24-Hour Time",
+                        checked = is24Hour,
+                        onCheckedChange = {
+                            is24Hour = it
+                            kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                com.example.util.RootExecutor.execute("settings put system time_12_24 ${if (it) "24" else "12"}")
+                            }
+                        }
+                    )
+                }
+            }
+
+            item {
+                IOSSettingsCard {
+                    IOSSettingsToggleRow(
+                        title = "Set Automatically",
+                        checked = autoTime,
+                        onCheckedChange = {
+                            autoTime = it
+                            kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                com.example.util.RootExecutor.execute("settings put global auto_time ${if (it) 1 else 0}")
+                            }
+                        }
+                    )
+                    HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
+                    IOSSettingsRow(
+                        title = "Time Zone",
+                        detail = timeZone,
+                        onClick = { showTimeZonePicker = true }
+                    )
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+            }
+        }
+    }
+
+    if (showTimeZonePicker) {
+        AlertDialog(
+            onDismissRequest = { showTimeZonePicker = false },
+            title = { Text("Select Time Zone", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    timeZones.forEach { tz ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    timeZone = tz
+                                    showTimeZonePicker = false
+                                    viewModel.showDynamicIslandNotification("Time Zone", tz, "clock")
+                                }
+                                .padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(tz, fontSize = 15.sp, color = Color.Black)
+                            if (timeZone == tz) {
+                                Icon(Icons.Rounded.Check, contentDescription = null, tint = Color(0xFF007AFF), modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showTimeZonePicker = false }) {
+                    Text("Close")
+                }
+            }
+        )
+    }
+}
+
+// 22. Language & Region SubPage
+@Composable
+fun LanguageSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
+    var selectedLang by remember { mutableStateOf("Bahasa Indonesia") }
+    var selectedRegion by remember { mutableStateOf("Indonesia") }
+    var showLangPicker by remember { mutableStateOf(false) }
+
+    val languages = listOf("Bahasa Indonesia", "English (US)", "English (UK)", "日本語 (Japanese)", "Español")
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(IOSSystemGray6)
+    ) {
+        SettingsTopBar(title = "Language & Region", onBack = onBack)
+
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            item {
+                Text("PREFERRED LANGUAGES", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Gray, modifier = Modifier.padding(start = 8.dp))
+            }
+            item {
+                IOSSettingsCard {
+                    IOSSettingsRow(
+                        title = "iPhone Language",
+                        detail = selectedLang,
+                        onClick = { showLangPicker = true }
+                    )
+                }
+            }
+
+            item {
+                Text("REGION FORMATS", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Gray, modifier = Modifier.padding(start = 8.dp))
+            }
+            item {
+                IOSSettingsCard {
+                    IOSSettingsRow(title = "Region", detail = selectedRegion)
+                    HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
+                    IOSSettingsRow(title = "Calendar", detail = "Gregorian")
+                    HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
+                    IOSSettingsRow(title = "Temperature", detail = "°C")
+                    HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
+                    IOSSettingsRow(title = "Measurement System", detail = "Metric")
+                    HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
+                    IOSSettingsRow(title = "First Day of Week", detail = "Monday")
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+            }
+        }
+    }
+
+    if (showLangPicker) {
+        AlertDialog(
+            onDismissRequest = { showLangPicker = false },
+            title = { Text("iPhone Language", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    languages.forEach { lang ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    selectedLang = lang
+                                    showLangPicker = false
+                                    viewModel.showDynamicIslandNotification("Language", lang, "globe")
+                                }
+                                .padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(lang, fontSize = 15.sp, color = Color.Black)
+                            if (selectedLang == lang) {
+                                Icon(Icons.Rounded.Check, contentDescription = null, tint = Color(0xFF007AFF), modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showLangPicker = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+// 23. VPN & Device Management SubPage
+@Composable
+fun VpnSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
+    var isVpnConnected by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(IOSSystemGray6)
+    ) {
+        SettingsTopBar(title = "VPN & Device Management", onBack = onBack)
+
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            item {
+                Text("VPN", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Gray, modifier = Modifier.padding(start = 8.dp))
+            }
+            item {
+                IOSSettingsCard {
+                    IOSSettingsToggleRow(
+                        title = "VPN Status",
+                        checked = isVpnConnected,
+                        onCheckedChange = {
+                            isVpnConnected = it
+                            viewModel.showDynamicIslandNotification("VPN", if (it) "Connected" else "Disconnected", "lock")
+                        }
+                    )
+                    HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
+                    IOSSettingsRow(title = "Add VPN Configuration...", detail = "", icon = Icons.Rounded.Add, iconBg = Color(0xFF007AFF), onClick = {})
+                }
+            }
+            item {
+                Text("DEVICE MANAGEMENT", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Gray, modifier = Modifier.padding(start = 8.dp))
+            }
+            item {
+                IOSSettingsCard {
+                    IOSSettingsRow(title = "Mobile Device Management", detail = "None")
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+            }
+        }
+    }
+}
+
+// 24. Transfer or Reset iPhone SubPage
+@Composable
+fun ResetSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
+    var showResetDialog by remember { mutableStateOf(false) }
+    var showEraseDialog by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(IOSSystemGray6)
+    ) {
+        SettingsTopBar(title = "Transfer or Reset iPhone", onBack = onBack)
+
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            item {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(Icons.Rounded.PhoneIphone, contentDescription = null, tint = Color(0xFF007AFF), modifier = Modifier.size(64.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("Prepare for New iPhone", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Color.Black)
+                    Text("Make sure you're ready to transfer your apps and data.", fontSize = 14.sp, color = Color.Gray, modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                }
+            }
+
+            item {
+                IOSSettingsCard {
+                    IOSSettingsRow(
+                        title = "Reset All Settings",
+                        detail = "",
+                        onClick = { showResetDialog = true }
+                    )
+                    HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
+                    IOSSettingsRow(
+                        title = "Reset Network Settings",
+                        detail = "",
+                        onClick = {
+                            viewModel.showDynamicIslandNotification("Network Settings", "Network settings reset", "wifi")
+                        }
+                    )
+                }
+            }
+
+            item {
+                IOSSettingsCard {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showEraseDialog = true }
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Erase All Content and Settings", color = Color(0xFFFF3B30), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+            }
+        }
+    }
+
+    if (showResetDialog) {
+        AlertDialog(
+            onDismissRequest = { showResetDialog = false },
+            title = { Text("Reset All Settings?") },
+            text = { Text("This will reset all settings including network, keyboard dictionary, home screen layout, and privacy settings. No data or media will be deleted.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showResetDialog = false
+                    viewModel.showDynamicIslandNotification("Reset Settings", "Settings Reset Completed", "checkmark.circle")
+                }) {
+                    Text("Reset All Settings", color = Color(0xFFFF3B30), fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showEraseDialog) {
+        AlertDialog(
+            onDismissRequest = { showEraseDialog = false },
+            title = { Text("Erase This iPhone?") },
+            text = { Text("Erasing will remove all your personal data, apps, and accounts. This action cannot be undone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showEraseDialog = false
+                    viewModel.showDynamicIslandNotification("Erase iPhone", "Erasing device...", "trash", 0xFFFF3B30)
+                }) {
+                    Text("Continue", color = Color(0xFFFF3B30), fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEraseDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+// ================= IPHONE 16/17 & IOS 26 SUBPAGES =================
+
+@Composable
+fun ActionButtonSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val currentFunction by viewModel.actionButtonFunction.collectAsState()
+
+    val functions = listOf(
+        Triple("Silent Mode", Icons.Rounded.NotificationsOff, Color(0xFFFF3B30)),
+        Triple("Flashlight", Icons.Rounded.FlashlightOn, Color(0xFFFF9500)),
+        Triple("Camera", Icons.Rounded.CameraAlt, Color(0xFF007AFF)),
+        Triple("Voice Memo", Icons.Rounded.Mic, Color(0xFFFF2D55)),
+        Triple("Focus", Icons.Rounded.DoNotDisturbOn, Color(0xFF5856D6)),
+        Triple("Root Tools", Icons.Rounded.Terminal, Color(0xFF34C759)),
+        Triple("None", Icons.Rounded.Block, Color(0xFF8E8E93))
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(IOSSystemGray6)
+    ) {
+        SettingsTopBar(title = "Action Button", onBack = onBack)
+
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            item {
+                // Hero Card: Action Button Preview
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color(0xFF1C1C1E))
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(64.dp)
+                                .clip(CircleShape)
+                                .background(Color(0x33FF9500)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.NotificationsActive,
+                                contentDescription = null,
+                                tint = Color(0xFFFF9500),
+                                modifier = Modifier.size(36.dp)
+                            )
+                        }
+                        Text(
+                            text = "Action Button",
+                            color = Color.White,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Press and hold the Action button to quickly access your favorite feature.",
+                            color = Color.Gray,
+                            fontSize = 13.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Button(
+                            onClick = {
+                                viewModel.triggerActionButton(context)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9500))
+                        ) {
+                            Icon(Icons.Rounded.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Test Action Button", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
+            item {
+                Text(
+                    text = "CHOOSE AN ACTION",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.Gray,
+                    modifier = Modifier.padding(start = 8.dp)
+                )
+            }
+
+            item {
+                IOSSettingsCard {
+                    functions.forEachIndexed { idx, (name, icon, color) ->
+                        val isSelected = currentFunction == name
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    viewModel.setActionButtonFunction(name, context)
+                                }
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(color),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                                }
+                                Text(
+                                    text = name,
+                                    color = Color.Black,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                            if (isSelected) {
+                                Icon(Icons.Rounded.Check, contentDescription = null, tint = Color(0xFF007AFF), modifier = Modifier.size(20.dp))
+                            }
+                        }
+                        if (idx < functions.size - 1) {
+                            HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
+                        }
+                    }
+                }
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(20.dp))
+            }
+        }
+    }
+}
+
+@Composable
+fun CameraControlSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val enabled by viewModel.cameraControlEnabled.collectAsState()
+    val sensitivity by viewModel.cameraControlSensitivity.collectAsState()
+    var cleanPreview by remember { mutableStateOf(true) }
+
+    val sensitivities = listOf("Light", "Default", "Firm")
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(IOSSystemGray6)
+    ) {
+        SettingsTopBar(title = "Camera Control", onBack = onBack)
+
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            item {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color(0xFF1C1C1E))
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(64.dp)
+                                .clip(CircleShape)
+                                .background(Color(0x33007AFF)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Camera,
+                                contentDescription = null,
+                                tint = Color(0xFF007AFF),
+                                modifier = Modifier.size(36.dp)
+                            )
+                        }
+                        Text(
+                            text = "Camera Control (iPhone 16/17)",
+                            color = Color.White,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "A dedicated tactile switch and force sensor gives you instant access to camera tools.",
+                            color = Color.Gray,
+                            fontSize = 13.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                }
+            }
+
+            item {
+                IOSSettingsCard {
+                    IOSSettingsToggleRow(
+                        title = "Camera Control",
+                        checked = enabled,
+                        onCheckedChange = {
+                            viewModel.setCameraControlEnabled(it, context)
+                        }
+                    )
+                    HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
+                    IOSSettingsToggleRow(
+                        title = "Clean Preview",
+                        checked = cleanPreview,
+                        onCheckedChange = { cleanPreview = it }
+                    )
+                }
+            }
+
+            item {
+                Text(
+                    text = "LIGHT PRESS PRESSURE SENSITIVITY",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.Gray,
+                    modifier = Modifier.padding(start = 8.dp)
+                )
+            }
+
+            item {
+                IOSSettingsCard {
+                    sensitivities.forEachIndexed { idx, sens ->
+                        val isSelected = sensitivity == sens
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    viewModel.setCameraControlSensitivity(sens, context)
+                                }
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(sens, fontSize = 16.sp, color = Color.Black, fontWeight = FontWeight.Medium)
+                            if (isSelected) {
+                                Icon(Icons.Rounded.Check, contentDescription = null, tint = Color(0xFF007AFF), modifier = Modifier.size(20.dp))
+                            }
+                        }
+                        if (idx < sensitivities.size - 1) {
+                            HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
+                        }
+                    }
+                }
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(20.dp))
+            }
+        }
+    }
+}
+
+@Composable
+fun StandBySubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val enabled by viewModel.standByEnabled.collectAsState()
+    val nightMode by viewModel.standByNightMode.collectAsState()
+    val alwaysOn by viewModel.standByAlwaysOn.collectAsState()
+    var showNotifications by remember { mutableStateOf(true) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(IOSSystemGray6)
+    ) {
+        SettingsTopBar(title = "StandBy", onBack = onBack)
+
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            item {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color(0xFF1C1C1E))
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(64.dp)
+                                .clip(CircleShape)
+                                .background(Color(0x33FF3B30)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.NightlightRound,
+                                contentDescription = null,
+                                tint = Color(0xFFFF3B30),
+                                modifier = Modifier.size(36.dp)
+                            )
+                        }
+                        Text(
+                            text = "StandBy (iOS 26)",
+                            color = Color.White,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "StandBy turns on when iPhone is placed on its side while charging, giving you glanceable info.",
+                            color = Color.Gray,
+                            fontSize = 13.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                }
+            }
+
+            item {
+                IOSSettingsCard {
+                    IOSSettingsToggleRow(
+                        title = "StandBy",
+                        checked = enabled,
+                        onCheckedChange = {
+                            viewModel.setStandByEnabled(it, context)
+                        }
+                    )
+                    HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
+                    IOSSettingsToggleRow(
+                        title = "Always On Display",
+                        checked = alwaysOn,
+                        onCheckedChange = {
+                            viewModel.setStandByAlwaysOn(it)
+                        }
+                    )
+                    HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
+                    IOSSettingsToggleRow(
+                        title = "Night Mode (Red Tint)",
+                        checked = nightMode,
+                        onCheckedChange = {
+                            viewModel.setStandByNightMode(it)
+                        }
+                    )
+                    HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
+                    IOSSettingsToggleRow(
+                        title = "Show Notifications",
+                        checked = showNotifications,
+                        onCheckedChange = { showNotifications = it }
+                    )
+                }
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(20.dp))
+            }
+        }
+    }
+}
+
 
 

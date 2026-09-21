@@ -1,6 +1,9 @@
 package com.example.ui.screens
 
 import android.view.HapticFeedbackConstants
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
 import androidx.compose.animation.fadeIn
@@ -77,6 +80,7 @@ fun SpringBoardScreen(
     val musicProgress by viewModel.musicProgress.collectAsState()
     val musicCurrentTimeStr by viewModel.musicCurrentTimeStr.collectAsState()
     val musicDurationStr by viewModel.musicDurationStr.collectAsState()
+    val currentFocus by viewModel.currentFocusMode.collectAsState()
     val context = LocalContext.current
 
     // Real Notification counts from ViewModel
@@ -90,9 +94,21 @@ fun SpringBoardScreen(
     }
 
     val photoItems by viewModel.photoItems.collectAsState()
+    val weatherData by viewModel.weatherData.collectAsState()
     val activePhotoWidgetIndex by viewModel.activePhotoWidgetIndex.collectAsState()
     val selectedWidgetPhotoIds by viewModel.selectedWidgetPhotoIds.collectAsState()
     var isPhotoWidgetPickerOpen by remember { mutableStateOf(false) }
+
+    val customAppIcons by viewModel.customAppIcons.collectAsState()
+    var targetAppForCustomIcon by remember { mutableStateOf<String?>(null) }
+    val iconPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null && targetAppForCustomIcon != null) {
+            viewModel.setCustomAppIcon(targetAppForCustomIcon!!, uri.toString(), context)
+            targetAppForCustomIcon = null
+        }
+    }
 
     val currentWidgetPhoto = remember(photoItems, activePhotoWidgetIndex, selectedWidgetPhotoIds) {
         val filtered = if (selectedWidgetPhotoIds.isNotEmpty()) {
@@ -188,7 +204,7 @@ fun SpringBoardScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .statusBarsPadding()
+                .padding(top = 4.dp)
                 .navigationBarsPadding(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -207,6 +223,7 @@ fun SpringBoardScreen(
                 networkType = networkType,
                 isAirplaneMode = airplaneMode,
                 isDarkIcons = false,
+                focusMode = currentFocus,
                 isMusicPlaying = isMusicPlaying,
                 musicProgress = musicProgress,
                 musicCurrentTimeStr = musicCurrentTimeStr,
@@ -214,7 +231,26 @@ fun SpringBoardScreen(
                 onMusicPlayPause = { viewModel.toggleMusicPlay() },
                 onMusicNext = { viewModel.skipNextSong(context) },
                 onMusicPrev = { viewModel.skipPreviousSong(context) },
-                onExpandMusic = { viewModel.showMusicInDynamicIsland() }
+                onExpandMusic = { viewModel.showMusicInDynamicIsland() },
+                onOpenIslandAction = {
+                    val intent = dynamicIslandData.contentIntent
+                    if (intent != null) {
+                        try {
+                            intent.send()
+                        } catch (_: Exception) {}
+                    } else {
+                        val pkg = dynamicIslandData.packageName
+                        if (!pkg.isNullOrBlank()) {
+                            try {
+                                val launchIntent = context.packageManager.getLaunchIntentForPackage(pkg)
+                                if (launchIntent != null) {
+                                    launchIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    context.startActivity(launchIntent)
+                                }
+                            } catch (_: Exception) {}
+                        }
+                    }
+                }
             )
 
             // Top Bar with "Done" button during Jiggle Mode
@@ -294,13 +330,13 @@ fun SpringBoardScreen(
                                     ) {
                                         Column {
                                             Text(
-                                                text = "Jakarta",
+                                                text = weatherData.city,
                                                 color = Color.White,
                                                 fontSize = 14.sp,
                                                 fontWeight = FontWeight.SemiBold
                                             )
                                             Text(
-                                                text = "28°",
+                                                text = "${weatherData.currentTemp}°",
                                                 color = Color.White,
                                                 fontSize = 36.sp,
                                                 fontWeight = FontWeight.Light,
@@ -309,20 +345,24 @@ fun SpringBoardScreen(
                                         }
                                         Column {
                                             Icon(
-                                                imageVector = Icons.Rounded.WbCloudy,
+                                                imageVector = when {
+                                                    weatherData.weatherCode in 61..82 -> Icons.Rounded.WaterDrop
+                                                    weatherData.weatherCode == 0 -> Icons.Rounded.WbSunny
+                                                    else -> Icons.Rounded.WbCloudy
+                                                },
                                                 contentDescription = null,
                                                 tint = Color.White.copy(alpha = 0.9f),
                                                 modifier = Modifier.size(24.dp)
                                             )
                                             Spacer(modifier = Modifier.height(2.dp))
                                             Text(
-                                                text = "Mostly Cloudy",
+                                                text = weatherData.condition,
                                                 color = Color.White,
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.Medium
                                             )
                                             Text(
-                                                text = "H:32°  L:24°",
+                                                text = "H:${weatherData.highTemp}°  L:${weatherData.lowTemp}°",
                                                 color = Color.White.copy(alpha = 0.8f),
                                                 fontSize = 11.sp
                                             )
@@ -465,6 +505,7 @@ fun SpringBoardScreen(
 
                                                 AppIconItem(
                                                     app = app,
+                                                    customIconUri = customAppIcons[app.id.name],
                                                     dayOfWeek = currentDayOfWeek,
                                                     dayOfMonth = currentDayOfMonth,
                                                     hourFloat = currentHourFloat,
@@ -591,6 +632,7 @@ fun SpringBoardScreen(
 
                             AppIconItem(
                                 app = app,
+                                customIconUri = customAppIcons[app.id.name],
                                 showLabel = false,
                                 isJiggleMode = isJiggleMode,
                                 rotationAngle = rotationAngle,
@@ -621,6 +663,9 @@ fun SpringBoardScreen(
                 onHoldForSiri = {
                     viewModel.openSiri()
                 },
+                onOpenAppSwitcher = {
+                    viewModel.openAppSwitcher()
+                },
                 isDark = false
             )
         }
@@ -642,15 +687,31 @@ fun SpringBoardScreen(
                 ) {
                     IOS3DTouchContextMenu(
                         app = app,
+                        customIconUri = customAppIcons[app.id.name],
                         onDismiss = { selected3DApp = null },
                         onAction = { action ->
                             selected3DApp = null
                             if (action == "Edit Home Screen") {
                                 isJiggleMode = true
+                            } else if (action == "Share App") {
+                                viewModel.openShareSheet("Aplikasi: ${app.name}")
                             } else {
                                 viewModel.openApp(app.id)
                             }
-                        }
+                        },
+                        onPickCustomIcon = {
+                            targetAppForCustomIcon = app.id.name
+                            selected3DApp = null
+                            iconPickerLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        },
+                        onResetCustomIcon = if (customAppIcons.containsKey(app.id.name)) {
+                            {
+                                viewModel.resetCustomAppIcon(app.id.name, context)
+                                selected3DApp = null
+                            }
+                        } else null
                     )
                 }
             }
@@ -751,6 +812,7 @@ fun SpringBoardScreen(
 @Composable
 fun AppIconItem(
     app: AppItem,
+    customIconUri: String? = null,
     showLabel: Boolean = true,
     dayOfWeek: String = "MON",
     dayOfMonth: String = "1",
@@ -788,7 +850,15 @@ fun AppIconItem(
                     .background(app.iconBgColor),
                 contentAlignment = Alignment.Center
             ) {
-                when (app.id) {
+                if (customIconUri != null) {
+                    AsyncImage(
+                        model = customIconUri,
+                        contentDescription = app.name,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    when (app.id) {
                     AppId.CALENDAR -> {
                         // Calendar with dynamic day of week and day of month
                         Column(
@@ -955,6 +1025,7 @@ fun AppIconItem(
                     }
                 }
             }
+        }
 
             // UNCLIPPED Notification Badge: Placed as sibling to clipped box!
             if (app.badgeCount > 0 && !isJiggleMode) {
@@ -1018,8 +1089,11 @@ fun AppIconItem(
 @Composable
 fun IOS3DTouchContextMenu(
     app: AppItem,
+    customIconUri: String? = null,
     onDismiss: () -> Unit,
-    onAction: (String) -> Unit
+    onAction: (String) -> Unit,
+    onPickCustomIcon: () -> Unit,
+    onResetCustomIcon: (() -> Unit)? = null
 ) {
     val quickActions = remember(app.id) {
         when (app.id) {
@@ -1093,7 +1167,14 @@ fun IOS3DTouchContextMenu(
                 .background(app.iconBgColor),
             contentAlignment = Alignment.Center
         ) {
-            if (app.iconVector != null) {
+            if (customIconUri != null) {
+                AsyncImage(
+                    model = customIconUri,
+                    contentDescription = app.name,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            } else if (app.iconVector != null) {
                 Icon(
                     imageVector = app.iconVector,
                     contentDescription = app.name,
@@ -1206,6 +1287,64 @@ fun IOS3DTouchContextMenu(
                         tint = Color.Black.copy(alpha = 0.8f),
                         modifier = Modifier.size(18.dp)
                     )
+                }
+
+                HorizontalDivider(
+                    color = Color(0xFFE5E5EA),
+                    thickness = 0.5.dp,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+
+                // Change Icon action
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onPickCustomIcon() }
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Ganti Ikon (Custom Icon)",
+                        color = Color(0xFF007AFF),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Icon(
+                        imageVector = Icons.Rounded.Image,
+                        contentDescription = null,
+                        tint = Color(0xFF007AFF),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                if (onResetCustomIcon != null) {
+                    HorizontalDivider(
+                        color = Color(0xFFE5E5EA),
+                        thickness = 0.5.dp,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onResetCustomIcon() }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Kembalikan Ikon Bawaan",
+                            color = Color(0xFFFF3B30),
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Icon(
+                            imageVector = Icons.Rounded.Restore,
+                            contentDescription = null,
+                            tint = Color(0xFFFF3B30),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
         }

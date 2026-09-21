@@ -4,13 +4,13 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.AirplanemodeActive
-import androidx.compose.material.icons.rounded.Wifi
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -50,10 +50,13 @@ fun IOSStatusBar(
     musicProgress: Float = 0f,
     musicCurrentTimeStr: String = "0:00",
     musicDurationStr: String = "3:45",
+    focusMode: com.example.model.FocusMode = com.example.model.FocusMode.OFF,
     onMusicPlayPause: () -> Unit = {},
     onMusicNext: () -> Unit = {},
     onMusicPrev: () -> Unit = {},
     onExpandMusic: () -> Unit = {},
+    onOpenIslandAction: (() -> Unit)? = null,
+    backgroundColor: Color = Color.Transparent,
     modifier: Modifier = Modifier
 ) {
     val iconColor = if (isDarkIcons) Color.Black else Color.White
@@ -84,7 +87,8 @@ fun IOSStatusBar(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(top = 4.dp, bottom = 2.dp)
+            .background(backgroundColor)
+            .padding(top = 1.dp, bottom = 1.dp)
     ) {
         // Left Side: Real Device Time (Tap or drag down to open Notification Center)
         Box(
@@ -104,13 +108,32 @@ fun IOSStatusBar(
                 }
                 .clickable { onOpenNotificationCenter() }
         ) {
-            Text(
-                text = currentTime,
-                color = iconColor,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = (-0.2).sp
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                Text(
+                    text = currentTime,
+                    color = iconColor,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = (-0.2).sp
+                )
+                if (focusMode != com.example.model.FocusMode.OFF) {
+                    Icon(
+                        imageVector = when (focusMode) {
+                            com.example.model.FocusMode.DO_NOT_DISTURB -> Icons.Rounded.NightlightRound
+                            com.example.model.FocusMode.WORK -> Icons.Rounded.Work
+                            com.example.model.FocusMode.PERSONAL -> Icons.Rounded.Person
+                            com.example.model.FocusMode.SLEEP -> Icons.Rounded.Bedtime
+                            else -> Icons.Rounded.NightlightRound
+                        },
+                        contentDescription = "Focus",
+                        tint = Color(focusMode.colorLong),
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
+            }
         }
 
         // Center: Dynamic Island
@@ -127,7 +150,8 @@ fun IOSStatusBar(
                 onMusicPlayPause = onMusicPlayPause,
                 onMusicNext = onMusicNext,
                 onMusicPrev = onMusicPrev,
-                onExpandMusic = onExpandMusic
+                onExpandMusic = onExpandMusic,
+                onOpenAction = onOpenIslandAction
             )
         }
 

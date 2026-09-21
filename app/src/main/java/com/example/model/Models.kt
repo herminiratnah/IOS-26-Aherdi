@@ -99,7 +99,9 @@ enum class ClockFontStyle {
 data class LockScreenConfig(
     val fontStyle: ClockFontStyle = ClockFontStyle.BOLD_MODERN,
     val clockColorHex: Long = 0xFFFFFFFF,
-    val wallpaperId: String = "default",
+    val wallpaperId: String = "mountain_depth",
+    val depthEffectEnabled: Boolean = true,
+    val depthTheme: String = "mountain", // "mountain", "planet", "dune", "skyline", "glass_ribbon", "none"
     val showWeatherWidget: Boolean = true,
     val showBatteryWidget: Boolean = true,
     val showCalendarWidget: Boolean = true
@@ -128,7 +130,9 @@ data class WallpaperItem(
     val name: String,
     val category: String, // "iOS 26", "Featured", "Astronomy", "Color"
     val drawableRes: Int,
-    val gradientColors: List<Long>? = null
+    val gradientColors: List<Long>? = null,
+    val hasDepthEffect: Boolean = false,
+    val depthTheme: String = "none"
 )
 
 data class ReminderItem(
@@ -152,5 +156,25 @@ data class IOSNotificationItem(
     val iconKey: String = "bell",
     val accentColor: Long = 0xFF007AFF
 )
+
+enum class FocusMode(val id: String, val label: String, val iconKey: String, val colorLong: Long) {
+    OFF("off", "Mati", "bell", 0xFF8E8E93),
+    DO_NOT_DISTURB("dnd", "Jangan Ganggu", "moon", 0xFF5856D6),
+    WORK("work", "Bekerja", "work", 0xFF007AFF),
+    PERSONAL("personal", "Pribadi", "person", 0xFFFF9500),
+    SLEEP("sleep", "Tidur", "bed", 0xFF5AC8FA)
+}
+
+enum class BackTapAction(val id: String, val label: String) {
+    NONE("none", "Tidak Ada"),
+    FLASHLIGHT("flashlight", "Senter"),
+    SCREENSHOT("screenshot", "Tangkapan Layar"),
+    CONTROL_CENTER("control_center", "Pusat Kontrol"),
+    NOTIFICATION_CENTER("notification_center", "Pusat Pemberitahuan"),
+    APP_SWITCHER("app_switcher", "Pengalih Aplikasi (App Switcher)"),
+    LOCK_SCREEN("lock_screen", "Kunci Layar"),
+    MUTE("mute", "Hening / Bisu")
+}
+
 
 

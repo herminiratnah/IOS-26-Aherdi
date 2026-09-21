@@ -1,7 +1,6 @@
 package com.example.ui.components
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -39,75 +38,183 @@ fun DynamicIsland(
     onMusicPlayPause: () -> Unit = {},
     onMusicNext: () -> Unit = {},
     onMusicPrev: () -> Unit = {},
-    onExpandMusic: () -> Unit = {}
+    onExpandMusic: () -> Unit = {},
+    onOpenAction: (() -> Unit)? = null
 ) {
     val isExpanded = data.mode != DynamicIslandMode.COMPACT
 
+    // Dynamic island spring sizing: center-aligned spring physics for both expanding and collapsing
+    val targetWidth = when (data.mode) {
+        DynamicIslandMode.COMPACT -> if (isMusicPlaying) 176.dp else 120.dp
+        DynamicIslandMode.NOTIFICATION -> 330.dp
+        DynamicIslandMode.CALL -> 330.dp
+        DynamicIslandMode.MUSIC -> 340.dp
+        DynamicIslandMode.TIMER -> 320.dp
+        DynamicIslandMode.BATTERY -> 320.dp
+        DynamicIslandMode.VOLUME -> 320.dp
+        else -> 240.dp
+    }
+
+    val targetHeight = when (data.mode) {
+        DynamicIslandMode.COMPACT -> 26.dp
+        DynamicIslandMode.NOTIFICATION -> 62.dp
+        DynamicIslandMode.CALL -> 62.dp
+        DynamicIslandMode.MUSIC -> 160.dp
+        DynamicIslandMode.TIMER -> 56.dp
+        DynamicIslandMode.BATTERY -> 58.dp
+        DynamicIslandMode.VOLUME -> 56.dp
+        else -> 46.dp
+    }
+
+    val targetCorner = when (data.mode) {
+        DynamicIslandMode.COMPACT -> 26.dp
+        DynamicIslandMode.MUSIC -> 34.dp
+        else -> 28.dp
+    }
+
+    // Spring animation spec - authentic iOS low-bouncy spring
+    val springSpecDp = spring<androidx.compose.ui.unit.Dp>(
+        dampingRatio = Spring.DampingRatioLowBouncy,
+        stiffness = Spring.StiffnessMediumLow
+    )
+
+    val islandWidth by animateDpAsState(
+        targetValue = targetWidth,
+        animationSpec = springSpecDp,
+        label = "islandWidth"
+    )
+
+    val islandHeight by animateDpAsState(
+        targetValue = targetHeight,
+        animationSpec = springSpecDp,
+        label = "islandHeight"
+    )
+
+    val islandCorner by animateDpAsState(
+        targetValue = targetCorner,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium),
+        label = "islandCorner"
+    )
+
     Box(
         modifier = modifier
-            .animateContentSize(
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioLowBouncy,
-                    stiffness = Spring.StiffnessMediumLow
-                )
-            )
-            .clip(RoundedCornerShape(32.dp))
+            .width(islandWidth)
+            .height(islandHeight)
+            .clip(RoundedCornerShape(islandCorner))
             .background(Color.Black)
             .clickable {
-                if (isExpanded) {
+                if (data.mode == DynamicIslandMode.NOTIFICATION) {
+                    if (onOpenAction != null) {
+                        onOpenAction()
+                    } else if (data.contentIntent != null) {
+                        try {
+                            data.contentIntent.send()
+                        } catch (_: Exception) {}
+                    }
+                    onDismiss()
+                } else if (isExpanded) {
                     onDismiss()
                 } else if (isMusicPlaying) {
                     onExpandMusic()
                 }
             }
-            .padding(horizontal = if (isExpanded) 14.dp else 10.dp, vertical = if (isExpanded) 10.dp else 5.dp),
+            .padding(
+                horizontal = if (isExpanded) 12.dp else 8.dp,
+                vertical = if (isExpanded) 6.dp else 2.dp
+            ),
         contentAlignment = Alignment.Center
     ) {
-        AnimatedContent(targetState = data, label = "DynamicIslandContent") { currentData ->
+        AnimatedContent(
+            targetState = data,
+            contentAlignment = Alignment.Center,
+            transitionSpec = {
+                (fadeIn(animationSpec = tween(160, delayMillis = 40)) + scaleIn(
+                    initialScale = 0.90f,
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)
+                )).togetherWith(
+                    fadeOut(animationSpec = tween(110)) + scaleOut(
+                        targetScale = 0.90f,
+                        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium)
+                    )
+                )
+            },
+            label = "DynamicIslandContent"
+        ) { currentData ->
             when (currentData.mode) {
                 DynamicIslandMode.COMPACT -> {
                     // Sleek authentic pill shape with camera dot and active music visualizer
                     Row(
                         modifier = Modifier
-                            .width(if (isMusicPlaying) 125.dp else 115.dp)
-                            .height(24.dp)
+                            .fillMaxSize()
                             .clickable {
                                 if (isMusicPlaying) onExpandMusic()
-                            },
+                            }
+                            .padding(horizontal = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        // Simulated front camera sensor punch-hole
-                        Box(
-                            modifier = Modifier
-                                .size(11.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF141416))
-                        )
-                        Spacer(modifier = Modifier.weight(1f))
                         if (isMusicPlaying) {
-                            // Active music wave visualizer in compact pill
+                            // Mini iOS Album Artwork / Music indicator on left
+                            Box(
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color(0xFFFF2D55)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.MusicNote,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(11.dp)
+                                )
+                            }
+                            // Center camera dot
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF141416))
+                            )
+                        } else {
+                            // Simulated front camera sensor punch-hole
+                            Box(
+                                modifier = Modifier
+                                    .size(11.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF141416))
+                            )
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+
+                        if (isMusicPlaying) {
+                            // Active animated music equalizer wave on right
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(2.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 val infiniteTransition = rememberInfiniteTransition(label = "compact_eq")
                                 val h1 by infiniteTransition.animateFloat(
-                                    initialValue = 4f, targetValue = 12f,
-                                    animationSpec = infiniteRepeatable(tween(400, easing = LinearEasing), RepeatMode.Reverse),
+                                    initialValue = 4f, targetValue = 13f,
+                                    animationSpec = infiniteRepeatable(tween(350, easing = LinearEasing), RepeatMode.Reverse),
                                     label = "c1"
                                 )
                                 val h2 by infiniteTransition.animateFloat(
                                     initialValue = 12f, targetValue = 5f,
-                                    animationSpec = infiniteRepeatable(tween(500, easing = LinearEasing), RepeatMode.Reverse),
+                                    animationSpec = infiniteRepeatable(tween(420, easing = LinearEasing), RepeatMode.Reverse),
                                     label = "c2"
                                 )
                                 val h3 by infiniteTransition.animateFloat(
-                                    initialValue = 6f, targetValue = 14f,
-                                    animationSpec = infiniteRepeatable(tween(350, easing = LinearEasing), RepeatMode.Reverse),
+                                    initialValue = 6f, targetValue = 15f,
+                                    animationSpec = infiniteRepeatable(tween(280, easing = LinearEasing), RepeatMode.Reverse),
                                     label = "c3"
                                 )
-                                listOf(h1, h2, h3).forEach { h ->
+                                val h4 by infiniteTransition.animateFloat(
+                                    initialValue = 10f, targetValue = 4f,
+                                    animationSpec = infiniteRepeatable(tween(490, easing = LinearEasing), RepeatMode.Reverse),
+                                    label = "c4"
+                                )
+                                listOf(h1, h2, h3, h4).forEach { h ->
                                     Box(
                                         modifier = Modifier
                                             .width(2.5.dp)
@@ -117,15 +224,15 @@ fun DynamicIsland(
                                     )
                                 }
                             }
-                            Spacer(modifier = Modifier.width(6.dp))
+                        } else {
+                            // Simulated FaceID / ambient light sensor dot
+                            Box(
+                                modifier = Modifier
+                                    .size(9.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF0A0A0C))
+                            )
                         }
-                        // Simulated FaceID / ambient light sensor dot
-                        Box(
-                            modifier = Modifier
-                                .size(9.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF0A0A0C))
-                        )
                     }
                 }
                 DynamicIslandMode.NOTIFICATION -> {

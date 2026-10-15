@@ -24,8 +24,22 @@ object IOSPersistenceManager {
     private const val KEY_ALARMS = "clock_alarms"
     private const val KEY_REMINDERS = "reminders_list"
 
-    private fun getPrefs(context: Context): SharedPreferences {
-        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    fun getPrefs(context: Context): SharedPreferences {
+        val targetContext = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N && !context.isDeviceProtectedStorage) {
+            val userManager = context.getSystemService(Context.USER_SERVICE) as? android.os.UserManager
+            if (userManager?.isUserUnlocked == false) {
+                context.createDeviceProtectedStorageContext()
+            } else {
+                context
+            }
+        } else {
+            context
+        }
+        return try {
+            targetContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        } catch (_: Exception) {
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        }
     }
 
     // ================= CALENDAR EVENTS =================
@@ -269,15 +283,6 @@ object IOSPersistenceManager {
                 e.printStackTrace()
             }
         }
-
-        if (list.isEmpty()) {
-            list.add(ReminderItem("rem_1", "Beli kopi Starbucks & pastry", "Pesan via app", "Today", false, "Personal", 0xFFFF9500))
-            list.add(ReminderItem("rem_2", "Selesaikan presentasi iOS 26 Pro", "Slides 12-18", "Today", false, "Work", 0xFF007AFF))
-            list.add(ReminderItem("rem_3", "Bayar tagihan listrik & internet", "Batas waktu tanggal 15", "Scheduled", false, "Bills", 0xFFFF3B30))
-            list.add(ReminderItem("rem_4", "Telepon keluarga sore ini", "Jam 17:00", "Today", true, "Personal", 0xFF34C759))
-            saveReminders(context, list)
-        }
-
         return list
     }
 
@@ -310,10 +315,127 @@ object IOSPersistenceManager {
     private const val KEY_DEPTH_THEME = "depth_theme_name"
 
     fun saveWallpaper(context: Context, resId: Int, name: String, uri: String? = null) {
+        saveLockScreenWallpaper(context, resId, name, uri)
+    }
+
+    fun saveLockScreenWallpaper(context: Context, resId: Int, name: String, uri: String? = null) {
         getPrefs(context).edit()
             .putInt(KEY_WALLPAPER_RES, resId)
             .putString(KEY_WALLPAPER_NAME, name)
             .putString(KEY_WALLPAPER_URI, uri ?: "")
+            .apply()
+    }
+
+    fun loadWallpaper(context: Context): Triple<Int, String, String?> = loadLockScreenWallpaper(context)
+
+    fun loadLockScreenWallpaper(context: Context): Triple<Int, String, String?> {
+        val prefs = getPrefs(context)
+        val rawResId = prefs.getInt(KEY_WALLPAPER_RES, com.example.R.drawable.wallpaper_alpine)
+        val name = prefs.getString(KEY_WALLPAPER_NAME, "Alpine Mountain Peak") ?: "Alpine Mountain Peak"
+        val uri = prefs.getString(KEY_WALLPAPER_URI, null)?.ifEmpty { null }
+
+        val validResId = if (rawResId <= 0) {
+            if (!uri.isNullOrBlank()) 0 else com.example.R.drawable.wallpaper_alpine
+        } else {
+            try {
+                val type = context.resources.getResourceTypeName(rawResId)
+                if (type == "drawable") rawResId else resolveWallpaperByName(name)
+            } catch (_: Throwable) {
+                if (!uri.isNullOrBlank()) 0 else resolveWallpaperByName(name)
+            }
+        }
+
+        return Triple(validResId, name, uri)
+    }
+
+    private const val KEY_HOME_WALLPAPER_RES = "home_wallpaper_res_id"
+    private const val KEY_HOME_WALLPAPER_NAME = "home_wallpaper_name"
+    private const val KEY_HOME_WALLPAPER_URI = "home_wallpaper_uri"
+
+    fun saveHomeScreenWallpaper(context: Context, resId: Int, name: String, uri: String? = null) {
+        getPrefs(context).edit()
+            .putInt(KEY_HOME_WALLPAPER_RES, resId)
+            .putString(KEY_HOME_WALLPAPER_NAME, name)
+            .putString(KEY_HOME_WALLPAPER_URI, uri ?: "")
+            .apply()
+    }
+
+    fun loadHomeScreenWallpaper(context: Context): Triple<Int, String, String?> {
+        val prefs = getPrefs(context)
+        val rawResId = prefs.getInt(KEY_HOME_WALLPAPER_RES, com.example.R.drawable.wallpaper_alpine)
+        val name = prefs.getString(KEY_HOME_WALLPAPER_NAME, "Alpine Mountain Peak") ?: "Alpine Mountain Peak"
+        val uri = prefs.getString(KEY_HOME_WALLPAPER_URI, null)?.ifEmpty { null }
+
+        val validResId = if (rawResId <= 0) {
+            if (!uri.isNullOrBlank()) 0 else com.example.R.drawable.wallpaper_alpine
+        } else {
+            try {
+                val type = context.resources.getResourceTypeName(rawResId)
+                if (type == "drawable") rawResId else resolveWallpaperByName(name)
+            } catch (_: Throwable) {
+                if (!uri.isNullOrBlank()) 0 else resolveWallpaperByName(name)
+            }
+        }
+
+        return Triple(validResId, name, uri)
+    }
+
+    fun resolveWallpaperByName(name: String): Int {
+        return when (name) {
+            "Twilight City Sunset" -> com.example.R.drawable.wp_twilight_clouds
+            "Monochrome Tidal Glow" -> com.example.R.drawable.wp_monochrome_wave
+            "Golden Desert Dunes" -> com.example.R.drawable.wp_golden_dunes
+            "Golden Coastal Sunset" -> com.example.R.drawable.wp_coastal_flora
+            "Dreamy Daisy Meadow" -> com.example.R.drawable.wp_daisy_meadow
+            "Golden Lake Reeds" -> com.example.R.drawable.wp_sunset_reeds
+            "Crystal Glass Sky" -> com.example.R.drawable.wp_crystal_glass
+            "Glass Clock Sanctuary" -> com.example.R.drawable.wp_glass_sanctuary
+            "Glass Still Life" -> com.example.R.drawable.wp_glass_still_life
+            else -> com.example.R.drawable.wallpaper_alpine
+        }
+    }
+
+    private const val KEY_CLOCK_FONT_STYLE = "lock_clock_font_style"
+    private const val KEY_CLOCK_LAYOUT_MODE = "lock_clock_layout_mode"
+    private const val KEY_CLOCK_COLOR_HEX = "lock_clock_color_hex"
+    private const val KEY_CLOCK_FONT_SIZE = "lock_clock_font_size"
+    private const val KEY_CLOCK_FONT_WEIGHT = "lock_clock_font_weight"
+    private const val KEY_CLOCK_OPACITY = "lock_clock_opacity"
+    private const val KEY_CLOCK_TOP_PADDING = "lock_clock_top_padding"
+    private const val KEY_CLOCK_HORIZ_OFFSET = "lock_clock_horiz_offset"
+    private const val KEY_CLOCK_POS_X = "lock_clock_pos_x"
+    private const val KEY_CLOCK_POS_Y = "lock_clock_pos_y"
+    private const val KEY_PARALLAX_INTENSITY = "lock_parallax_intensity"
+    private const val KEY_SHOW_BG_SUN = "lock_show_bg_sun"
+    private const val KEY_SHOW_AMBIENT_ATMO = "lock_show_ambient_atmo"
+    private const val KEY_USE_AUTO_THEME_COLOR = "lock_use_auto_theme_color"
+    private const val KEY_WIDGET_WEATHER = "lock_widget_weather"
+    private const val KEY_WIDGET_BATTERY = "lock_widget_battery"
+    private const val KEY_WIDGET_CALENDAR = "lock_widget_calendar"
+    private const val KEY_CUSTOM_FG_URI = "lock_custom_fg_uri"
+
+    fun saveFullLockScreenConfig(context: Context, config: com.example.model.LockScreenConfig) {
+        getPrefs(context).edit()
+            .putBoolean(KEY_DEPTH_EFFECT, config.depthEffectEnabled)
+            .putString(KEY_DEPTH_THEME, config.depthTheme)
+            .putString(KEY_CLOCK_FONT_STYLE, config.fontStyle.name)
+            .putString(KEY_CLOCK_LAYOUT_MODE, config.clockLayoutMode.name)
+            .putLong(KEY_CLOCK_COLOR_HEX, config.clockColorHex)
+            .putFloat(KEY_CLOCK_FONT_SIZE, config.clockFontSize)
+            .putInt(KEY_CLOCK_FONT_WEIGHT, config.clockFontWeight)
+            .putFloat(KEY_CLOCK_OPACITY, config.clockOpacity)
+            .putFloat(KEY_CLOCK_TOP_PADDING, config.clockTopPaddingPercent)
+            .putFloat(KEY_CLOCK_HORIZ_OFFSET, config.clockHorizontalOffset)
+            .putFloat(KEY_CLOCK_POS_X, config.clockPosX)
+            .putFloat(KEY_CLOCK_POS_Y, config.clockPosY)
+            .putFloat(KEY_PARALLAX_INTENSITY, config.parallaxIntensity)
+            .putBoolean(KEY_SHOW_BG_SUN, config.showBackgroundSun)
+            .putBoolean(KEY_SHOW_AMBIENT_ATMO, config.showAmbientAtmosphere)
+            .putBoolean(KEY_USE_AUTO_THEME_COLOR, config.useAutoThemeColor)
+            .putString(KEY_CUSTOM_FG_URI, config.customForegroundUri ?: "")
+            .putBoolean(KEY_WIDGET_WEATHER, config.showWeatherWidget)
+            .putBoolean(KEY_WIDGET_BATTERY, config.showBatteryWidget)
+            .putBoolean(KEY_WIDGET_CALENDAR, config.showCalendarWidget)
             .apply()
     }
 
@@ -324,12 +446,44 @@ object IOSPersistenceManager {
             .apply()
     }
 
-    fun loadWallpaper(context: Context): Triple<Int, String, String?> {
+    fun loadFullLockScreenConfig(context: Context): com.example.model.LockScreenConfig {
         val prefs = getPrefs(context)
-        val resId = prefs.getInt(KEY_WALLPAPER_RES, com.example.R.drawable.wallpaper_mountain_depth)
-        val name = prefs.getString(KEY_WALLPAPER_NAME, "Alpine Mountain Peak") ?: "Alpine Mountain Peak"
-        val uri = prefs.getString(KEY_WALLPAPER_URI, null)?.ifEmpty { null }
-        return Triple(resId, name, uri)
+        val fontStyleStr = prefs.getString(KEY_CLOCK_FONT_STYLE, com.example.model.ClockFontStyle.EDITORIAL_SERIF.name)
+        val fontStyle = try {
+            com.example.model.ClockFontStyle.valueOf(fontStyleStr ?: com.example.model.ClockFontStyle.EDITORIAL_SERIF.name)
+        } catch (_: Exception) {
+            com.example.model.ClockFontStyle.EDITORIAL_SERIF
+        }
+
+        val layoutModeStr = prefs.getString(KEY_CLOCK_LAYOUT_MODE, com.example.model.ClockLayoutMode.STACKED_EDITORIAL.name)
+        val layoutMode = try {
+            com.example.model.ClockLayoutMode.valueOf(layoutModeStr ?: com.example.model.ClockLayoutMode.STACKED_EDITORIAL.name)
+        } catch (_: Exception) {
+            com.example.model.ClockLayoutMode.STACKED_EDITORIAL
+        }
+
+        return com.example.model.LockScreenConfig(
+            fontStyle = fontStyle,
+            clockLayoutMode = layoutMode,
+            clockColorHex = prefs.getLong(KEY_CLOCK_COLOR_HEX, 0xFFFFFFFF),
+            useAutoThemeColor = prefs.getBoolean(KEY_USE_AUTO_THEME_COLOR, true),
+            clockFontSize = prefs.getFloat(KEY_CLOCK_FONT_SIZE, 108f),
+            clockFontWeight = prefs.getInt(KEY_CLOCK_FONT_WEIGHT, 600),
+            clockOpacity = prefs.getFloat(KEY_CLOCK_OPACITY, 1.0f),
+            clockTopPaddingPercent = prefs.getFloat(KEY_CLOCK_TOP_PADDING, 0.10f),
+            clockHorizontalOffset = prefs.getFloat(KEY_CLOCK_HORIZ_OFFSET, 0f),
+            clockPosX = prefs.getFloat(KEY_CLOCK_POS_X, 0.5f),
+            clockPosY = prefs.getFloat(KEY_CLOCK_POS_Y, 0.22f),
+            parallaxIntensity = prefs.getFloat(KEY_PARALLAX_INTENSITY, 1.0f),
+            showBackgroundSun = prefs.getBoolean(KEY_SHOW_BG_SUN, true),
+            showAmbientAtmosphere = prefs.getBoolean(KEY_SHOW_AMBIENT_ATMO, true),
+            depthEffectEnabled = prefs.getBoolean(KEY_DEPTH_EFFECT, true),
+            depthTheme = prefs.getString(KEY_DEPTH_THEME, "mountain") ?: "mountain",
+            customForegroundUri = prefs.getString(KEY_CUSTOM_FG_URI, null)?.ifEmpty { null },
+            showWeatherWidget = prefs.getBoolean(KEY_WIDGET_WEATHER, false),
+            showBatteryWidget = prefs.getBoolean(KEY_WIDGET_BATTERY, false),
+            showCalendarWidget = prefs.getBoolean(KEY_WIDGET_CALENDAR, false)
+        )
     }
 
     fun loadDepthConfig(context: Context): Pair<Boolean, String> {
@@ -365,27 +519,6 @@ object IOSPersistenceManager {
                 e.printStackTrace()
             }
         }
-
-        if (list.isEmpty()) {
-            list.add(
-                NoteItem(
-                    id = "note_1",
-                    title = "Fitur iOS 26 Pro",
-                    body = "• Dynamic Island & Status Bar melayang di semua aplikasi\n• Kontrol musik real-time dengan live visualizer\n• Sinkronisasi Kalender, Jam & Reminder\n• Desain iOS 18 asli dengan Spring Physics",
-                    dateLabel = "Today"
-                )
-            )
-            list.add(
-                NoteItem(
-                    id = "note_2",
-                    title = "Daftar Belanja Mingguan",
-                    body = "• Kopi Arabica\n• Croissant butter\n• Susu segar & madu\n• Buah apel & blueberry",
-                    dateLabel = "Yesterday"
-                )
-            )
-            saveNotes(context, list)
-        }
-
         return list
     }
 
@@ -518,4 +651,119 @@ object IOSPersistenceManager {
 
     fun saveBackTapTripleAction(context: Context, action: com.example.model.BackTapAction) =
         getPrefs(context).edit().putString("back_tap_triple_action", action.name).commit()
+
+    // ================= HOME SCREEN & DOCK APPS PERSISTENCE =================
+    private const val KEY_HOME_SCREEN_APPS = "ios_home_screen_apps_list"
+    private const val KEY_DOCK_APPS = "ios_dock_apps_list"
+
+    fun loadHomeScreenApps(context: Context): List<String>? {
+        val raw = getPrefs(context).getString(KEY_HOME_SCREEN_APPS, null) ?: return null
+        if (raw.isBlank()) return emptyList()
+        return raw.split(";").filter { it.isNotBlank() }
+    }
+
+    fun saveHomeScreenApps(context: Context, apps: List<String>) {
+        val raw = apps.joinToString(";")
+        getPrefs(context).edit().putString(KEY_HOME_SCREEN_APPS, raw).apply()
+    }
+
+    fun loadDockApps(context: Context): List<String>? {
+        val raw = getPrefs(context).getString(KEY_DOCK_APPS, null) ?: return null
+        if (raw.isBlank()) return emptyList()
+        return raw.split(";").filter { it.isNotBlank() }
+    }
+
+    fun saveDockApps(context: Context, apps: List<String>) {
+        val raw = apps.joinToString(";")
+        getPrefs(context).edit().putString(KEY_DOCK_APPS, raw).apply()
+    }
+
+    // ================= APP LIBRARY CUSTOM FOLDERS PERSISTENCE =================
+    private const val KEY_APP_CATEGORY_OVERRIDES = "app_category_overrides"
+    private const val KEY_CUSTOM_FOLDERS = "custom_folders"
+
+    fun loadAppCategoryOverrides(context: Context): Map<String, String> {
+        val map = mutableMapOf<String, String>()
+        val json = getPrefs(context).getString(KEY_APP_CATEGORY_OVERRIDES, null) ?: return map
+        return try {
+            val obj = JSONObject(json)
+            val keys = obj.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                map[k] = obj.getString(k)
+            }
+            map
+        } catch (_: Exception) {
+            map
+        }
+    }
+
+    fun saveAppCategoryOverride(context: Context, appKey: String, newCategory: String) {
+        try {
+            val current = loadAppCategoryOverrides(context).toMutableMap()
+            current[appKey] = newCategory
+            val obj = JSONObject(current as Map<*, *>)
+            getPrefs(context).edit().putString(KEY_APP_CATEGORY_OVERRIDES, obj.toString()).apply()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    fun loadCustomFolders(context: Context): List<String> {
+        val json = getPrefs(context).getString(KEY_CUSTOM_FOLDERS, null) ?: return emptyList()
+        return try {
+            val arr = JSONArray(json)
+            val list = mutableListOf<String>()
+            for (i in 0 until arr.length()) {
+                list.add(arr.getString(i))
+            }
+            list
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    fun saveCustomFolder(context: Context, folderName: String) {
+        try {
+            val list = loadCustomFolders(context).toMutableList()
+            if (!list.contains(folderName)) {
+                list.add(folderName)
+                val arr = JSONArray(list)
+                getPrefs(context).edit().putString(KEY_CUSTOM_FOLDERS, arr.toString()).apply()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    fun removeCustomFolder(context: Context, folderName: String) {
+        try {
+            val list = loadCustomFolders(context).toMutableList()
+            if (list.remove(folderName)) {
+                val arr = JSONArray(list)
+                getPrefs(context).edit().putString(KEY_CUSTOM_FOLDERS, arr.toString()).apply()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private const val KEY_GEMINI_API_KEY = "gemini_api_key_custom"
+    private const val KEY_GEMINI_MODEL = "gemini_model_custom"
+
+    fun getGeminiApiKey(context: Context): String {
+        return getPrefs(context).getString(KEY_GEMINI_API_KEY, "") ?: ""
+    }
+
+    fun saveGeminiApiKey(context: Context, key: String) {
+        getPrefs(context).edit().putString(KEY_GEMINI_API_KEY, key.trim()).apply()
+    }
+
+    fun getGeminiModel(context: Context): String {
+        return getPrefs(context).getString(KEY_GEMINI_MODEL, "gemini-flash-latest") ?: "gemini-flash-latest"
+    }
+
+    fun saveGeminiModel(context: Context, model: String) {
+        getPrefs(context).edit().putString(KEY_GEMINI_MODEL, model.trim()).apply()
+    }
 }

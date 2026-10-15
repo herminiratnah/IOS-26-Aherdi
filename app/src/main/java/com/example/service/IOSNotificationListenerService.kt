@@ -12,6 +12,8 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
+import com.example.viewmodel.DynamicIslandData
+import com.example.viewmodel.DynamicIslandMode
 
 import android.app.PendingIntent
 
@@ -80,10 +82,8 @@ class IOSNotificationListenerService : NotificationListenerService() {
             ?: extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
             ?: ""
 
-        // Skip empty or purely ongoing background service notifications
+        // Skip empty notifications
         if (title.isBlank() && text.isBlank()) return
-        if ((notification.flags and Notification.FLAG_ONGOING_EVENT) != 0) return
-        if ((notification.flags and Notification.FLAG_FOREGROUND_SERVICE) != 0) return
 
         val pm = packageManager
         val appName = try {
@@ -93,11 +93,63 @@ class IOSNotificationListenerService : NotificationListenerService() {
             pkg
         }
 
+        // Check if this is a Phone Call or WhatsApp/VoIP Call notification
+        val isCallNotification = notification.category == Notification.CATEGORY_CALL ||
+                pkg.contains("dialer", ignoreCase = true) ||
+                pkg.contains("telecom", ignoreCase = true) ||
+                (pkg.contains("whatsapp", ignoreCase = true) && (
+                    text.contains("panggilan", ignoreCase = true) ||
+                    text.contains("call", ignoreCase = true) ||
+                    title.contains("panggilan", ignoreCase = true) ||
+                    title.contains("call", ignoreCase = true)
+                )) ||
+                (pkg.contains("telegram", ignoreCase = true) && (
+                    text.contains("panggilan", ignoreCase = true) ||
+                    text.contains("call", ignoreCase = true)
+                ))
+
+        // If NOT a call, skip pure background ongoing/foreground services
+        if (!isCallNotification) {
+            if ((notification.flags and Notification.FLAG_ONGOING_EVENT) != 0) return
+            if ((notification.flags and Notification.FLAG_FOREGROUND_SERVICE) != 0) return
+        }
+
+        if (isCallNotification) {
+            // Authentic Dynamic Island Call Handling for Cellular & WhatsApp
+            val isIncoming = text.contains("masuk", ignoreCase = true) ||
+                    text.contains("incoming", ignoreCase = true) ||
+                    (notification.actions != null && notification.actions.size >= 2)
+            val callerName = if (title.isNotBlank() && !title.equals("WhatsApp", ignoreCase = true) && !title.equals("Telegram", ignoreCase = true)) {
+                title
+            } else {
+                text.ifBlank { "Panggilan Masuk" }
+            }
+
+            OverlayBridge.isInCall.value = true
+            OverlayBridge.callName.value = callerName
+            OverlayBridge.dynamicIslandData.value = DynamicIslandData(
+                mode = DynamicIslandMode.CALL,
+                title = callerName,
+                subtitle = if (isIncoming) "$appName Audio..." else "00:01",
+                icon = if (pkg.contains("whatsapp", ignoreCase = true)) "whatsapp" else "phone",
+                accentColor = if (pkg.contains("whatsapp", ignoreCase = true)) 0xFF25D366 else 0xFF34C759,
+                voipAppName = appName,
+                isIncomingCall = isIncoming,
+                packageName = pkg,
+                contentIntent = notification.contentIntent
+            )
+        }
+
         // Map apps to custom iOS icon and accent colors
         val (iconKey, accentColor) = when {
             pkg.contains("whatsapp", ignoreCase = true) -> Pair("whatsapp", 0xFF25D366)
             pkg.contains("instagram", ignoreCase = true) -> Pair("instagram", 0xFFE1306C)
             pkg.contains("telegram", ignoreCase = true) -> Pair("telegram", 0xFF2AABEE)
+            pkg.contains("gojek", ignoreCase = true) -> Pair("delivery", 0xFF00AA13)
+            pkg.contains("grab", ignoreCase = true) -> Pair("delivery", 0xFF00B14F)
+            pkg.contains("shopee", ignoreCase = true) -> Pair("delivery", 0xFFEE4D2D)
+            pkg.contains("flight", ignoreCase = true) || pkg.contains("garuda", ignoreCase = true) || pkg.contains("airasia", ignoreCase = true) || pkg.contains("lion", ignoreCase = true) -> Pair("flight", 0xFF007AFF)
+            pkg.contains("meet", ignoreCase = true) || pkg.contains("skype", ignoreCase = true) || pkg.contains("line", ignoreCase = true) -> Pair("phone", 0xFF34C759)
             pkg.contains("twitter", ignoreCase = true) || pkg.contains(".x.", ignoreCase = true) -> Pair("message", 0xFF1DA1F2)
             pkg.contains("tiktok", ignoreCase = true) -> Pair("music", 0xFFEE1D52)
             pkg.contains("youtube", ignoreCase = true) -> Pair("music", 0xFFFF0000)
@@ -121,6 +173,23 @@ class IOSNotificationListenerService : NotificationListenerService() {
                     contentIntent = notification.contentIntent
                 )
             )
+        }
+    }
+
+    override fun onNotificationRemoved(sbn: StatusBarNotification?) {
+        super.onNotificationRemoved(sbn)
+        if (sbn == null) return
+        val pkg = sbn.packageName ?: return
+        val notification = sbn.notification
+        val isCall = notification?.category == Notification.CATEGORY_CALL ||
+                pkg.contains("dialer", ignoreCase = true) ||
+                pkg.contains("telecom", ignoreCase = true) ||
+                pkg.contains("whatsapp", ignoreCase = true) ||
+                pkg.contains("telegram", ignoreCase = true)
+
+        if (isCall && OverlayBridge.isInCall.value) {
+            OverlayBridge.isInCall.value = false
+            OverlayBridge.dynamicIslandData.value = DynamicIslandData(mode = DynamicIslandMode.COMPACT)
         }
     }
 }

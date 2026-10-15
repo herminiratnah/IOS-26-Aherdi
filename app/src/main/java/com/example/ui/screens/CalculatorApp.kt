@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -175,6 +176,10 @@ fun CalculatorApp(
         isNewEntry = true
     }
 
+    BackHandler(enabled = isHistoryOpen) {
+        isHistoryOpen = false
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -186,14 +191,8 @@ fun CalculatorApp(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Status bar
-            IOSStatusBar(
-                dynamicIslandData = dynamicIslandData,
-                onDismissDynamicIsland = { viewModel.dismissDynamicIsland() },
-                onOpenControlCenter = { viewModel.toggleControlCenter() },
-                onOpenNotificationCenter = { viewModel.toggleNotificationCenter() },
-                isDarkIcons = false
-            )
+            // Spacer for Single Global Status Bar
+            Spacer(modifier = Modifier.height(44.dp))
 
             // Top Header: History icon & Mode title
             Row(

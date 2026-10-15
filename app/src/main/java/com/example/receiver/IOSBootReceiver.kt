@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import com.example.data.IOSPersistenceManager
-import com.example.service.IOSOverlayService
 import com.example.util.RootExecutor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -13,8 +12,8 @@ import kotlinx.coroutines.launch
 
 /**
  * BroadcastReceiver triggered automatically upon device startup or reboot.
- * Guarantees that iOS system customizations (disabling SystemUI, CPU Governor,
- * 120Hz ProMotion, and Dynamic Island overlays) persist across restarts!
+ * Safely restores system telemetry and root configurations without crashing or
+ * blocking Android OS boot sequence.
  */
 class IOSBootReceiver : BroadcastReceiver() {
 
@@ -24,7 +23,6 @@ class IOSBootReceiver : BroadcastReceiver() {
 
         val validBootActions = listOf(
             Intent.ACTION_BOOT_COMPLETED,
-            Intent.ACTION_LOCKED_BOOT_COMPLETED,
             Intent.ACTION_MY_PACKAGE_REPLACED,
             "android.intent.action.QUICKBOOT_POWERON",
             "com.htc.intent.action.QUICKBOOT_POWERON"
@@ -32,51 +30,63 @@ class IOSBootReceiver : BroadcastReceiver() {
 
         if (action !in validBootActions) return
 
-        // Always reset any residual screen overscan on boot so launcher is 100% fullscreen
+        // Run non-blocking background initialization safely
         CoroutineScope(Dispatchers.IO).launch {
             try {
+                // Give Magisk daemon and system services 2.5 seconds to settle after reboot
+                kotlinx.coroutines.delay(2500)
+
+                // Ensure no destructive scripts exist in Magisk service directories
+                RootExecutor.cleanMagiskScripts()
+
+                // Reset screen overscan safely
                 RootExecutor.resetTopDisplayInset()
 
-                // Check if Android SystemUI was disabled by user in iRoot
-                val isSystemUIDisabled = IOSPersistenceManager.loadRootBoolean(context, "systemui_disabled", false)
-                if (isSystemUIDisabled) {
-                    Log.d("IOSBootReceiver", "Enforcing persistent SystemUI suppression after reboot")
-                    RootExecutor.disableSystemUICompletely()
-                } else {
-                    val isImmersive = IOSPersistenceManager.loadRootBoolean(context, "immersive", false)
-                    if (isImmersive) {
-                        RootExecutor.killAndroidBars()
-                    }
-                }
-
                 // Restore CPU boost if previously activated
-                val isCpuBoost = IOSPersistenceManager.loadRootBoolean(context, "cpu_boost", false)
+                val isCpuBoost = try {
+                    IOSPersistenceManager.loadRootBoolean(context, "cpu_boost", false)
+                } catch (_: Throwable) { false }
                 if (isCpuBoost) {
                     RootExecutor.boostCpuGovernor()
                 }
 
                 // Restore 120Hz ProMotion if unlocked
-                val is120Hz = IOSPersistenceManager.loadRootBoolean(context, "120hz", false)
+                val is120Hz = try {
+                    IOSPersistenceManager.loadRootBoolean(context, "120hz", false)
+                } catch (_: Throwable) { false }
                 if (is120Hz) {
                     RootExecutor.setHighRefreshRate(true)
                 }
 
                 // Restore Thermal engine modification
-                val isThermalDisabled = IOSPersistenceManager.loadRootBoolean(context, "thermal_disabled", false)
+                val isThermalDisabled = try {
+                    IOSPersistenceManager.loadRootBoolean(context, "thermal_disabled", false)
+                } catch (_: Throwable) { false }
                 if (isThermalDisabled) {
                     RootExecutor.setThermalThrottling(true)
                 }
 
                 // Restore SELinux mode
-                val isSELinuxPermissive = IOSPersistenceManager.loadRootBoolean(context, "selinux_permissive", false)
+                val isSELinuxPermissive = try {
+                    IOSPersistenceManager.loadRootBoolean(context, "selinux_permissive", false)
+                } catch (_: Throwable) { false }
                 if (isSELinuxPermissive) {
                     RootExecutor.setSELinuxPermissive(true)
                 }
 
-                // Start Dynamic Island & Status Bar overlay service
-                IOSOverlayService.start(context)
-            } catch (e: Exception) {
-                Log.e("IOSBootReceiver", "Failed applying root persistence on boot: ${e.message}")
+                // Restore volume interception ONLY if user explicitly enabled it in Settings
+                val isVolumeInterception = try {
+                    IOSPersistenceManager.loadRootBoolean(context, "volume_interception", false)
+                } catch (_: Throwable) { false }
+                if (isVolumeInterception) {
+                    RootExecutor.enableVolumeInterception(context)
+                }
+
+                // NOTE: We deliberately do NOT start Foreground Service directly from BroadcastReceiver
+                // to prevent ForegroundServiceStartNotAllowedException crashes on Android 12/13/14+.
+                // MainActivity (as the default launcher) will start the overlay cleanly upon displaying.
+            } catch (e: Throwable) {
+                Log.e("IOSBootReceiver", "Safely caught boot error: ${e.message}")
             }
         }
     }

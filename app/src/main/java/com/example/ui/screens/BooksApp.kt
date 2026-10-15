@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -126,6 +127,10 @@ fun BooksApp(
         )
     }
 
+    BackHandler(enabled = readingBook != null) {
+        readingBook = null
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -134,21 +139,8 @@ fun BooksApp(
             .navigationBarsPadding()
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            IOSStatusBar(
-                dynamicIslandData = dynamicIslandData,
-                onDismissDynamicIsland = { viewModel.dismissDynamicIsland() },
-                onOpenControlCenter = { viewModel.toggleControlCenter() },
-                onOpenNotificationCenter = { viewModel.toggleNotificationCenter() },
-                currentTime = currentTime,
-                batteryLevel = batteryLevel,
-                isBatteryCharging = isBatteryCharging,
-                isWifiConnected = isWifiConnected,
-                wifiSignalLevel = wifiSignalLevel,
-                cellularBars = cellularBars,
-                networkType = networkType,
-                isAirplaneMode = airplaneMode,
-                isDarkIcons = !(readingBook != null && readerTheme == "Dark")
-            )
+            // Spacer for Single Global Status Bar
+            Spacer(modifier = Modifier.height(44.dp))
 
             if (readingBook != null) {
                 // In-book Reader View

@@ -18,6 +18,26 @@ object RootExecutor {
     @Volatile
     private var cachedWorkingShell: String? = null
 
+    private fun Process.waitForTimeout(timeoutMs: Long): Boolean {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            return try {
+                waitFor(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+            } catch (_: Exception) {
+                false
+            }
+        }
+        val start = System.currentTimeMillis()
+        while (System.currentTimeMillis() - start < timeoutMs) {
+            try {
+                exitValue()
+                return true
+            } catch (_: IllegalThreadStateException) {
+                try { Thread.sleep(50) } catch (_: InterruptedException) { return false }
+            }
+        }
+        return false
+    }
+
     /**
      * Checks if SU can be executed and granted root (uid=0).
      * Caches the result to prevent repeated process creation lag, but allows re-verification.
@@ -29,9 +49,13 @@ object RootExecutor {
             val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "id"))
             val reader = BufferedReader(InputStreamReader(process.inputStream))
             val line = reader.readLine() ?: ""
-            val exitCode = process.waitFor()
-            (exitCode == 0 && line.contains("uid=0")).also { ok ->
-                if (ok) cachedWorkingShell = "su"
+            val finished = process.waitForTimeout(1500)
+            if (finished && process.exitValue() == 0 && line.contains("uid=0")) {
+                cachedWorkingShell = "su"
+                true
+            } else {
+                try { process.destroy() } catch (_: Exception) {}
+                false
             }
         } catch (e: Exception) {
             // Check known root binary paths as fallback
@@ -83,13 +107,15 @@ object RootExecutor {
                 while (reader.readLine().also { line = it } != null) {
                     output.append(line).append("\n")
                 }
-                val exitCode = process.waitFor()
-                if (exitCode == 0) {
+                val finished = process.waitForTimeout(2500)
+                if (finished && process.exitValue() == 0) {
                     if (shell.contains("su")) {
                         cachedWorkingShell = "su"
                         cachedRootAvailable = true
                     }
                     return Pair(true, output.toString().trim())
+                } else if (!finished) {
+                    try { process.destroy() } catch (_: Exception) {}
                 }
             } catch (ignored: Exception) {}
         }
@@ -154,7 +180,11 @@ object RootExecutor {
                         }
                     }
 
-                    val exitVal = process.waitFor()
+                    val finished = process.waitForTimeout(3000)
+                    val exitVal = if (finished) process.exitValue() else -1
+                    if (!finished) {
+                        try { process.destroy() } catch (_: Exception) {}
+                    }
                     val outText = stdOut.toString().trim()
                     val errText = stdErr.toString().trim()
 
@@ -209,12 +239,8 @@ object RootExecutor {
      */
     suspend fun killAndroidBars(): Pair<Boolean, String> {
         val cmd = """
-            settings put global policy_control immersive.navigation=*
             settings put secure immersive_mode_confirmations confirmed
             settings put secure icon_blacklist wifi,battery,clock,signal,bluetooth,headset,alarm,zen,volume,location,mute,speakerphone,nfc,hotspot,all
-            service call statusbar 1 i32 65536 2>/dev/null || true
-            service call statusbar 2 i32 65536 2>/dev/null || true
-            service call statusbar 3 i32 65536 2>/dev/null || true
             which cmd >/dev/null 2>&1 && cmd statusbar collapse 2>/dev/null || true
             am broadcast -a com.android.systemui.statusbar.phone.COLLAPSE_PANELS 2>/dev/null || true
             wm overscan reset 2>/dev/null || wm overscan 0,0,0,0 2>/dev/null || true
@@ -223,56 +249,37 @@ object RootExecutor {
     }
 
     /**
-     * Disables SystemUI package completely & blocks top pull-down swipe shade.
-     * Also writes a Magisk startup script (/data/adb/service.d/iroot_init.sh) so that
-     * even after device RESTART / REBOOT, Android SystemUI remains completely disabled!
+     * Cleans up any destructive boot scripts to prevent OS crash on restart
+     */
+    suspend fun cleanMagiskScripts(): Pair<Boolean, String> {
+        val cmd = """
+            rm -f /data/adb/service.d/iroot_init.sh /data/adb/post-fs-data.d/iroot_init.sh /data/iroot_boot.sh 2>/dev/null || true
+            pm unhide com.android.systemui 2>/dev/null || true
+            pm enable com.android.systemui 2>/dev/null || true
+        """.trimIndent()
+        return executeCommand(cmd)
+    }
+
+    /**
+     * Safely suppresses Android stock status bar icons via icon_blacklist and immersive control
+     * without killing or disabling com.android.systemui (which would break Home, Back, and cause boot crashes).
      */
     suspend fun disableSystemUICompletely(): Pair<Boolean, String> {
         val cmd = """
-            # 1. Navigation bar immersive across all apps (reserves status bar space for apps)
-            settings put global policy_control immersive.navigation=*
-            settings put secure immersive_mode_confirmations confirmed
+            # 1. Clean any old destructive scripts
+            rm -f /data/adb/service.d/iroot_init.sh /data/adb/post-fs-data.d/iroot_init.sh /data/iroot_boot.sh 2>/dev/null || true
+
+            # 2. Ensure SystemUI is running for navigation and input handling
+            pm unhide com.android.systemui 2>/dev/null || true
+            pm enable com.android.systemui 2>/dev/null || true
+
+            # 3. Suppress all stock status bar icons cleanly
             settings put secure icon_blacklist wifi,battery,clock,signal,bluetooth,headset,alarm,zen,volume,location,mute,speakerphone,nfc,hotspot,all
+            settings put secure immersive_mode_confirmations confirmed
             wm overscan reset 2>/dev/null || wm overscan 0,0,0,0 2>/dev/null || true
 
-            # 2. Block statusbar pull down via StatusBarManager (DISABLE_EXPAND = 65536)
-            service call statusbar 1 i32 65536 2>/dev/null || true
-            service call statusbar 2 i32 65536 2>/dev/null || true
-            service call statusbar 3 i32 65536 2>/dev/null || true
             which cmd >/dev/null 2>&1 && cmd statusbar collapse 2>/dev/null || true
             am broadcast -a com.android.systemui.statusbar.phone.COLLAPSE_PANELS 2>/dev/null || true
-
-            # 3. Disable SystemUI package (user 0 and global)
-            pm disable-user --user 0 com.android.systemui 2>/dev/null || pm disable com.android.systemui 2>/dev/null || true
-            pm hide com.android.systemui 2>/dev/null || true
-
-            # 4. Stop and kill SystemUI process
-            pkill -STOP -f com.android.systemui 2>/dev/null || killall -STOP com.android.systemui 2>/dev/null || true
-            pkill -9 -f com.android.systemui 2>/dev/null || killall -9 com.android.systemui 2>/dev/null || true
-
-            # 5. REBOOT PERSISTENCE: Write Magisk auto-boot service script
-            mkdir -p /data/adb/service.d 2>/dev/null || true
-            mkdir -p /data/adb/post-fs-data.d 2>/dev/null || true
-            cat << 'EOF' > /data/adb/service.d/iroot_init.sh
-#!/system/bin/sh
-# iRoot Persistent SystemUI Killer
-sleep 3
-settings put global policy_control immersive.navigation=*
-settings put secure immersive_mode_confirmations confirmed
-settings put secure icon_blacklist wifi,battery,clock,signal,bluetooth,headset,alarm,zen,volume,location,mute,speakerphone,nfc,hotspot,all
-wm overscan reset 2>/dev/null || wm overscan 0,0,0,0 2>/dev/null || true
-service call statusbar 1 i32 65536 2>/dev/null || true
-service call statusbar 2 i32 65536 2>/dev/null || true
-service call statusbar 3 i32 65536 2>/dev/null || true
-pm disable-user --user 0 com.android.systemui 2>/dev/null || pm disable com.android.systemui 2>/dev/null || true
-pm hide com.android.systemui 2>/dev/null || true
-pkill -9 -f com.android.systemui 2>/dev/null || killall -9 com.android.systemui 2>/dev/null || true
-EOF
-            chmod 755 /data/adb/service.d/iroot_init.sh 2>/dev/null || true
-            cp /data/adb/service.d/iroot_init.sh /data/adb/post-fs-data.d/iroot_init.sh 2>/dev/null || true
-            chmod 755 /data/adb/post-fs-data.d/iroot_init.sh 2>/dev/null || true
-            cat /data/adb/service.d/iroot_init.sh > /data/iroot_boot.sh 2>/dev/null || true
-            chmod 755 /data/iroot_boot.sh 2>/dev/null || true
         """.trimIndent()
         return executeCommand(cmd)
     }
@@ -285,15 +292,8 @@ EOF
             rm -f /data/adb/service.d/iroot_init.sh /data/adb/post-fs-data.d/iroot_init.sh /data/iroot_boot.sh 2>/dev/null || true
             pkill -CONT -f com.android.systemui 2>/dev/null || killall -CONT com.android.systemui 2>/dev/null || true
             pm unhide com.android.systemui 2>/dev/null || true
-            pm default-state --user 0 com.android.systemui 2>/dev/null || true
             pm enable com.android.systemui 2>/dev/null || true
-            settings delete secure icon_blacklist 2>/dev/null || true
-            settings put secure icon_blacklist null 2>/dev/null || true
-            service call statusbar 1 i32 0 2>/dev/null || true
-            service call statusbar 2 i32 0 2>/dev/null || true
-            service call statusbar 3 i32 0 2>/dev/null || true
             am startservice -n com.android.systemui/.SystemUIService 2>/dev/null || true
-            settings put global policy_control null* 2>/dev/null || true
             wm overscan reset 2>/dev/null || wm overscan 0,0,0,0 2>/dev/null || true
         """.trimIndent()
         return executeCommand(cmd)
@@ -308,13 +308,10 @@ EOF
     }
 
     /**
-     * Ensures dedicated space by enabling immersive navigation and keeping physical display at 0,0,0,0
+     * Ensures dedicated space by keeping physical display at 0,0,0,0
      */
     suspend fun setTopDisplayInset(topPx: Int = 0): Pair<Boolean, String> {
-        val cmd = """
-            settings put global policy_control immersive.navigation=*
-            wm overscan reset 2>/dev/null || wm overscan 0,0,0,0 2>/dev/null || true
-        """.trimIndent()
+        val cmd = "wm overscan reset 2>/dev/null || wm overscan 0,0,0,0 2>/dev/null || true"
         return executeCommand(cmd)
     }
 
@@ -340,15 +337,49 @@ EOF
     }
 
     /**
-     * Boosts CPU Governor to performance mode for all CPU cores (Mediatek MT6737T / Exynos 3475)
+     * Optimizes CPU Governor to power-efficient balanced mode (schedutil / interactive)
+     * Resets minimum frequency to lowest hardware clock so CPU can sleep and charge coolly
      */
     suspend fun boostCpuGovernor(): Pair<Boolean, String> {
         val cmd = """
             for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
-                echo performance > "${'$'}g" 2>/dev/null || true
+                avail="${'$'}{g%/*}/scaling_available_governors"
+                if [ -f "${'$'}avail" ]; then
+                    if grep -q "schedutil" "${'$'}avail" 2>/dev/null; then
+                        echo schedutil > "${'$'}g" 2>/dev/null || true
+                    elif grep -q "interactive" "${'$'}avail" 2>/dev/null; then
+                        echo interactive > "${'$'}g" 2>/dev/null || true
+                    elif grep -q "ondemand" "${'$'}avail" 2>/dev/null; then
+                        echo ondemand > "${'$'}g" 2>/dev/null || true
+                    fi
+                fi
             done
             for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_min_freq; do
-                cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq > "${'$'}f" 2>/dev/null || true
+                min_f="${'$'}{f%/*}/cpuinfo_min_freq"
+                if [ -f "${'$'}min_f" ]; then
+                    cat "${'$'}min_f" > "${'$'}f" 2>/dev/null || true
+                fi
+            done
+        """.trimIndent()
+        return executeCommand(cmd)
+    }
+
+    /**
+     * Restores optimal charging and thermal management so battery charges quickly and stays cool
+     */
+    suspend fun restoreHealthyChargingState(): Pair<Boolean, String> {
+        val cmd = """
+            start thermal-engine 2>/dev/null || true
+            start sec-thermald 2>/dev/null || true
+            start thermald 2>/dev/null || true
+            start thermalservice 2>/dev/null || true
+            chmod 644 /sys/class/thermal/thermal_zone*/temp 2>/dev/null || true
+            setprop sys.thermal.policy 1 2>/dev/null || true
+            for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_min_freq; do
+                min_f="${'$'}{f%/*}/cpuinfo_min_freq"
+                if [ -f "${'$'}min_f" ]; then
+                    cat "${'$'}min_f" > "${'$'}f" 2>/dev/null || true
+                fi
             done
         """.trimIndent()
         return executeCommand(cmd)
@@ -449,5 +480,55 @@ EOF
             "soft" -> executeCommand("pkill -9 -f com.android.systemui || killall -9 zygote")
             else -> executeCommand("reboot || svc power reboot")
         }
+    }
+
+    /**
+     * Automatically enables IOSVolumeAccessibilityService using root to suppress stock Android volume dialog
+     * and redirect hardware volume keys 100% to the sleek iOS Dynamic Island pill.
+     */
+    suspend fun enableVolumeInterception(context: Context): Pair<Boolean, String> {
+        val serviceComponent = "${context.packageName}/${com.example.service.IOSVolumeAccessibilityService::class.java.name}"
+        val cmd = """
+            settings put secure accessibility_enabled 1
+            cur=${'$'}(settings get secure enabled_accessibility_services)
+            if [ -z "${'$'}cur" ] || [ "${'$'}cur" = "null" ]; then
+                settings put secure enabled_accessibility_services "$serviceComponent"
+            else
+                case "${'$'}cur" in
+                    *"$serviceComponent"*) ;;
+                    *) settings put secure enabled_accessibility_services "${'$'}cur:$serviceComponent" ;;
+                esac
+            fi
+        """.trimIndent()
+        return executeCommand(cmd)
+    }
+
+    /**
+     * Checks if volume interception accessibility service is currently enabled.
+     */
+    fun isVolumeInterceptionEnabled(context: Context): Boolean {
+        return try {
+            val enabledServices = android.provider.Settings.Secure.getString(
+                context.contentResolver,
+                android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+            ) ?: ""
+            val serviceName = com.example.service.IOSVolumeAccessibilityService::class.java.name
+            enabledServices.contains(serviceName)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Disables volume interception accessibility service using root.
+     */
+    suspend fun disableVolumeInterception(context: Context): Pair<Boolean, String> {
+        val serviceComponent = "${context.packageName}/${com.example.service.IOSVolumeAccessibilityService::class.java.name}"
+        val cmd = """
+            cur=${'$'}(settings get secure enabled_accessibility_services)
+            new_val=${'$'}(echo "${'$'}cur" | sed "s|:$serviceComponent||g; s|$serviceComponent:||g; s|$serviceComponent||g")
+            settings put secure enabled_accessibility_services "${'$'}new_val"
+        """.trimIndent()
+        return executeCommand(cmd)
     }
 }

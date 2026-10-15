@@ -87,21 +87,8 @@ fun ClockApp(
             .navigationBarsPadding()
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Status bar (Light icons on black background)
-            IOSStatusBar(
-                dynamicIslandData = dynamicIslandData,
-                onDismissDynamicIsland = { viewModel.dismissDynamicIsland() },
-                onOpenControlCenter = { viewModel.toggleControlCenter() },
-                onOpenNotificationCenter = { viewModel.toggleNotificationCenter() },
-                currentTime = currentTimeFormatted,
-                batteryLevel = batteryLevel,
-                isBatteryCharging = isBatteryCharging,
-                isWifiConnected = isWifiConnected,
-                wifiSignalLevel = wifiSignalLevel,
-                cellularBars = cellularBars,
-                networkType = networkType,
-                isDarkIcons = false
-            )
+            // Spacer for Single Global Status Bar
+            Spacer(modifier = Modifier.height(44.dp))
 
             // Main Content based on Selected Tab
             Box(modifier = Modifier.weight(1f)) {

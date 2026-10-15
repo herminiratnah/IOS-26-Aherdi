@@ -47,9 +47,16 @@ fun SpotlightSearchOverlay(
 
     var query by remember { mutableStateOf("") }
     val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     val context = androidx.compose.ui.platform.LocalContext.current
     val weatherData by viewModel.weatherData.collectAsState()
     val flashlightEnabled by viewModel.flashlightEnabled.collectAsState()
+
+    fun dismissCleanly() {
+        focusManager.clearFocus()
+        keyboardController?.hide()
+        onDismiss()
+    }
 
     val allSearchItems = remember {
         listOf(
@@ -112,10 +119,7 @@ fun SpotlightSearchOverlay(
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
-                onClick = {
-                    keyboardController?.hide()
-                    onDismiss()
-                }
+                onClick = { dismissCleanly() }
             )
             .statusBarsPadding()
             .padding(horizontal = 20.dp, vertical = 20.dp)

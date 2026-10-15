@@ -53,12 +53,10 @@ fun IOSLockScreenView(
     val cellularBars by viewModel.cellularSignalBars.collectAsState()
     val networkType by viewModel.networkType.collectAsState()
     val lockScreenConfig by viewModel.lockScreenConfig.collectAsState()
-    val isCustomizeOpen by viewModel.isLockScreenCustomizeOpen.collectAsState()
 
     var showPasscodePad by remember { mutableStateOf(false) }
     var enteredPasscode by remember { mutableStateOf("") }
     var isPasscodeError by remember { mutableStateOf(false) }
-    var isFaceIdScanning by remember { mutableStateOf(false) }
 
     val coroutineScope = rememberCoroutineScope()
     val shakeOffset = remember { Animatable(0f) }
@@ -71,16 +69,44 @@ fun IOSLockScreenView(
         if (isLocked) {
             enteredPasscode = ""
             showPasscodePad = false
-            IOSFeedbackHelper.playLockSound(context)
-            if (isFaceIdEnabled) {
-                isFaceIdScanning = true
-                delay(850)
-                isFaceIdScanning = false
-                IOSFeedbackHelper.vibrateSuccess(context)
-                IOSFeedbackHelper.playUnlockSound(context)
+        }
+    }
+
+    val requestPasscodeTrigger by viewModel.requestPasscodeTrigger.collectAsState()
+    LaunchedEffect(requestPasscodeTrigger) {
+        if (requestPasscodeTrigger > 0 && isLocked) {
+            if (isPasscodeEnabled) {
+                if (!showPasscodePad) {
+                    showPasscodePad = true
+                    IOSFeedbackHelper.vibrateLight(context)
+                } else {
+                    IOSFeedbackHelper.vibrateLight(context)
+                    coroutineScope.launch {
+                        shakeOffset.animateTo(
+                            targetValue = 12f,
+                            animationSpec = spring(dampingRatio = Spring.DampingRatioHighBouncy, stiffness = Spring.StiffnessHigh)
+                        )
+                        shakeOffset.animateTo(
+                            targetValue = -12f,
+                            animationSpec = spring(dampingRatio = Spring.DampingRatioHighBouncy, stiffness = Spring.StiffnessHigh)
+                        )
+                        shakeOffset.animateTo(
+                            targetValue = 0f,
+                            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)
+                        )
+                    }
+                }
+            } else {
+                IOSFeedbackHelper.vibrateLight(context)
                 viewModel.unlockDevice()
             }
         }
+    }
+
+    androidx.activity.compose.BackHandler(enabled = isLocked && showPasscodePad) {
+        showPasscodePad = false
+        enteredPasscode = ""
+        IOSFeedbackHelper.vibrateLight(context)
     }
 
     fun performUnlock() {
@@ -88,8 +114,7 @@ fun IOSLockScreenView(
             showPasscodePad = true
             IOSFeedbackHelper.vibrateLight(context)
         } else {
-            IOSFeedbackHelper.vibrateSuccess(context)
-            IOSFeedbackHelper.playUnlockSound(context)
+            IOSFeedbackHelper.vibrateLight(context)
             viewModel.unlockDevice()
         }
     }
@@ -104,18 +129,8 @@ fun IOSLockScreenView(
                 .fillMaxSize()
                 .background(Color.Black)
                 .pointerInput(Unit) {
-                    detectTapGestures(
-                        onLongPress = {
-                            if (!showPasscodePad) {
-                                IOSFeedbackHelper.vibrateMedium(context)
-                                viewModel.openLockScreenCustomize()
-                            }
-                        }
-                    )
-                }
-                .pointerInput(Unit) {
                     detectVerticalDragGestures { _, dragAmount ->
-                        if (dragAmount < -35f && !showPasscodePad) {
+                        if (dragAmount < -20f && !showPasscodePad) {
                             performUnlock()
                         }
                     }
@@ -150,93 +165,68 @@ fun IOSLockScreenView(
                     .navigationBarsPadding(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Top iOS Status Bar
-                IOSStatusBar(
-                    dynamicIslandData = dynamicIslandData,
-                    onDismissDynamicIsland = { viewModel.dismissDynamicIsland() },
-                    onOpenControlCenter = { viewModel.toggleControlCenter() },
-                    onOpenNotificationCenter = { viewModel.toggleNotificationCenter() },
-                    currentTime = currentTime,
-                    batteryLevel = batteryLevel,
-                    isBatteryCharging = isBatteryCharging,
-                    isWifiConnected = isWifiConnected,
-                    wifiSignalLevel = wifiSignalLevel,
-                    cellularBars = cellularBars,
-                    networkType = networkType,
-                    isDarkIcons = false
-                )
+                // Spacer for Single Global Status Bar
+                Spacer(modifier = Modifier.height(34.dp))
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
-                // Lock / Face ID Status Icon
+                // Lock Status Icon
                 Box(
-                    modifier = Modifier.size(34.dp),
+                    modifier = Modifier.size(28.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (isFaceIdScanning) {
-                        CircularProgressIndicator(
-                            color = Color.White,
-                            strokeWidth = 2.dp,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    } else {
-                        Icon(
-                            imageVector = if (showPasscodePad) Icons.Rounded.Lock else Icons.Rounded.LockOpen,
-                            contentDescription = "Lock Status",
-                            tint = Color.White,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
+                    Icon(
+                        imageVector = if (showPasscodePad) Icons.Rounded.Lock else Icons.Rounded.LockOpen,
+                        contentDescription = "Lock Status",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
 
                 if (!showPasscodePad) {
                     // Lock Screen Idle Mode: Spacer pushes unlock gesture & shortcuts to bottom
                     Spacer(modifier = Modifier.weight(1f))
 
-                    // Swipe Up / Tap to Unlock Prompt with HomeBar indicator
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier
-                            .clickable { performUnlock() }
-                            .padding(bottom = 8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.KeyboardArrowUp,
-                            contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.85f),
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Text(
-                            text = "Swipe up or tap to unlock",
-                            color = Color.White.copy(alpha = 0.9f),
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Normal
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Box(
-                            modifier = Modifier
-                                .width(135.dp)
-                                .height(5.dp)
-                                .clip(RoundedCornerShape(3.dp))
-                                .background(Color.White.copy(alpha = 0.7f))
-                        )
-                    }
+                    // Authentic iOS Lock Screen Bottom Bar: Flashlight, Animated "Swipe up to unlock" + Home Bar, & Camera
+                    val infiniteTransition = rememberInfiniteTransition(label = "iosLockAnim")
 
-                    // Bottom Quick Shortcuts: Flashlight & Camera
-                    Row(
+                    // Smooth subtle upward bounce animation
+                    val bounceY by infiniteTransition.animateFloat(
+                        initialValue = 0f,
+                        targetValue = -5f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(durationMillis = 1100, easing = FastOutSlowInEasing),
+                            repeatMode = RepeatMode.Reverse
+                        ),
+                        label = "bounceY"
+                    )
+
+                    // Subtle breathing pulse for chevron & swipe text
+                    val pulseAlpha by infiniteTransition.animateFloat(
+                        initialValue = 0.55f,
+                        targetValue = 0.95f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(durationMillis = 1400, easing = FastOutSlowInEasing),
+                            repeatMode = RepeatMode.Reverse
+                        ),
+                        label = "pulseAlpha"
+                    )
+
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 46.dp, vertical = 18.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(horizontal = 46.dp, vertical = 24.dp),
+                        contentAlignment = Alignment.Center
                     ) {
+                        // Left: Flashlight Button
                         val flashlightOn by viewModel.flashlightEnabled.collectAsState()
                         Box(
                             modifier = Modifier
-                                .size(50.dp)
+                                .align(Alignment.CenterStart)
+                                .size(48.dp)
                                 .clip(CircleShape)
                                 .background(if (flashlightOn) Color.White else Color(0x66000000))
-                                .border(1.dp, Color.White.copy(alpha = 0.3f), CircleShape)
+                                .border(1.dp, Color.White.copy(alpha = 0.25f), CircleShape)
                                 .clickable {
                                     IOSFeedbackHelper.vibrateMedium(context)
                                     viewModel.toggleFlashlight(context)
@@ -247,48 +237,65 @@ fun IOSLockScreenView(
                                 imageVector = Icons.Rounded.FlashlightOn,
                                 contentDescription = "Flashlight",
                                 tint = if (flashlightOn) Color.Black else Color.White,
-                                modifier = Modifier.size(22.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         }
 
-                        // Customize Wallpaper hint button
-                        Box(
+                        // Center: Animated "Swipe up to unlock" + Authentic Home Bar (Sejajar dengan Flashlight & Camera)
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
                             modifier = Modifier
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(Color.Black.copy(alpha = 0.45f))
-                                .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(16.dp))
-                                .clickable {
-                                    IOSFeedbackHelper.vibrateLight(context)
-                                    viewModel.openLockScreenCustomize()
+                                .align(Alignment.Center)
+                                .offset(y = bounceY.dp)
+                                .clickable { performUnlock() }
+                                .pointerInput(Unit) {
+                                    detectVerticalDragGestures { _, dragAmount ->
+                                        if (dragAmount < -15f) {
+                                            performUnlock()
+                                        }
+                                    }
                                 }
-                                .padding(horizontal = 12.dp, vertical = 6.dp),
-                            contentAlignment = Alignment.Center
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.AutoAwesome,
-                                    contentDescription = null,
-                                    tint = Color.White.copy(alpha = 0.85f),
-                                    modifier = Modifier.size(13.dp)
-                                )
-                                Text(
-                                    text = "Customize",
-                                    color = Color.White.copy(alpha = 0.85f),
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                            }
+                            // Subtle upward chevron
+                            Icon(
+                                imageVector = Icons.Rounded.KeyboardArrowUp,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = pulseAlpha),
+                                modifier = Modifier.size(18.dp)
+                            )
+
+                            Spacer(modifier = Modifier.height(1.dp))
+
+                            // Authentic iOS lock screen text
+                            Text(
+                                text = "Swipe up to unlock",
+                                color = Color.White.copy(alpha = pulseAlpha),
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Normal,
+                                letterSpacing = 0.3.sp
+                            )
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            // Authentic Home Bar Pill Indicator
+                            Box(
+                                modifier = Modifier
+                                    .width(135.dp)
+                                    .height(4.dp)
+                                    .clip(RoundedCornerShape(2.5.dp))
+                                    .background(Color.White.copy(alpha = 0.85f))
+                            )
                         }
 
+                        // Right: Camera Button
                         Box(
                             modifier = Modifier
-                                .size(50.dp)
+                                .align(Alignment.CenterEnd)
+                                .size(48.dp)
                                 .clip(CircleShape)
                                 .background(Color(0x66000000))
-                                .border(1.dp, Color.White.copy(alpha = 0.3f), CircleShape)
+                                .border(1.dp, Color.White.copy(alpha = 0.25f), CircleShape)
                                 .clickable {
                                     IOSFeedbackHelper.vibrateMedium(context)
                                     viewModel.unlockDevice()
@@ -300,7 +307,7 @@ fun IOSLockScreenView(
                                 imageVector = Icons.Rounded.CameraAlt,
                                 contentDescription = "Camera",
                                 tint = Color.White,
-                                modifier = Modifier.size(22.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }
@@ -491,15 +498,6 @@ fun IOSLockScreenView(
 
                     Spacer(modifier = Modifier.weight(1.1f))
                 }
-            }
-
-            // Lock Screen Customizer Sheet Modal
-            if (isCustomizeOpen) {
-                LockScreenCustomizerSheet(
-                    config = lockScreenConfig,
-                    onUpdateConfig = { viewModel.updateLockScreenConfig(it) },
-                    onClose = { viewModel.closeLockScreenCustomize() }
-                )
             }
         }
     }

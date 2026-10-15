@@ -62,6 +62,8 @@
 
     <application
         android:allowBackup="true"
+        android:largeHeap="true"
+        android:requestLegacyExternalStorage="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
@@ -73,8 +75,12 @@
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
+            android:launchMode="singleTask"
+            android:clearTaskOnLaunch="true"
+            android:stateNotNeeded="true"
+            android:showWhenLocked="true"
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|smallestScreenSize"
-            android:windowSoftInputMode="adjustResize"
+            android:windowSoftInputMode="adjustResize|stateHidden"
             android:theme="@style/Theme.MyApplication">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -107,6 +113,20 @@
                 android:value="System-wide Dynamic Island and Status Bar Overlay" />
         </service>
 
+        <!-- Global iOS Dynamic Island Volume Key Interceptor -->
+        <service
+            android:name="com.example.service.IOSVolumeAccessibilityService"
+            android:label="iOS Dynamic Island Volume Controller"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_volume_service" />
+        </service>
+
         <!-- Minimalist iOS Style Keyboard InputMethodService -->
         <service
             android:name="com.example.service.IOSKeyboardService"
@@ -125,11 +145,9 @@
         <receiver
             android:name="com.example.receiver.IOSBootReceiver"
             android:enabled="true"
-            android:exported="true"
-            android:directBootAware="true">
-            <intent-filter android:priority="999">
+            android:exported="true">
+            <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
                 <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />

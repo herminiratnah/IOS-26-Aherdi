@@ -89,22 +89,45 @@ data class MailItem(
 )
 
 enum class ClockFontStyle {
-    BOLD_MODERN,
-    SERIF_CLASSIC,
-    ROUNDED_SLICK,
-    TECH_STENCIL,
-    MINIMAL_THIN
+    EDITORIAL_SERIF,  // Bodoni Moda High-Fashion Luxury Serif (Didot style)
+    SERIF_CLASSIC,    // Cormorant Garamond / Classic Serif
+    PLAYFAIR_DISPLAY, // Playfair Display Luxury Editorial
+    BOLD_MODERN,      // iOS Bold Sans
+    ROUNDED_SLICK,    // iOS Rounded
+    TECH_STENCIL,     // Monospace
+    MINIMAL_THIN,     // Ultra Light
+    ELEGANT_SCRIPT,   // Cursive / Calligraphy
+    RETRO_HEAVY,      // Impact / Extra Bold Sans
+    CYBER_PUNK        // Futuristic Stencil / Monospace Bold
+}
+
+enum class ClockLayoutMode {
+    STACKED_EDITORIAL,  // 2-line stacked ("09" above "41") as in user designs
+    HORIZONTAL_STANDARD // 1-line horizontal ("09:41") classic iOS
 }
 
 data class LockScreenConfig(
-    val fontStyle: ClockFontStyle = ClockFontStyle.BOLD_MODERN,
+    val fontStyle: ClockFontStyle = ClockFontStyle.EDITORIAL_SERIF,
+    val clockLayoutMode: ClockLayoutMode = ClockLayoutMode.STACKED_EDITORIAL,
     val clockColorHex: Long = 0xFFFFFFFF,
+    val useAutoThemeColor: Boolean = true,
+    val clockFontSize: Float = 108f,
+    val clockFontWeight: Int = 600,
+    val clockOpacity: Float = 1.0f,
+    val clockTopPaddingPercent: Float = 0.10f,
+    val clockHorizontalOffset: Float = 0f,
+    val clockPosX: Float = 0.5f,
+    val clockPosY: Float = 0.22f,
+    val parallaxIntensity: Float = 1.0f,
+    val showBackgroundSun: Boolean = true,
+    val showAmbientAtmosphere: Boolean = true,
     val wallpaperId: String = "mountain_depth",
     val depthEffectEnabled: Boolean = true,
-    val depthTheme: String = "mountain", // "mountain", "planet", "dune", "skyline", "glass_ribbon", "none"
-    val showWeatherWidget: Boolean = true,
-    val showBatteryWidget: Boolean = true,
-    val showCalendarWidget: Boolean = true
+    val depthTheme: String = "mountain", // "mountain", "twilight_clouds", "monochrome_wave", "golden_dunes", etc.
+    val customForegroundUri: String? = null,
+    val showWeatherWidget: Boolean = false,
+    val showBatteryWidget: Boolean = false,
+    val showCalendarWidget: Boolean = false
 )
 
 data class RootCommandLog(
@@ -175,6 +198,23 @@ enum class BackTapAction(val id: String, val label: String) {
     LOCK_SCREEN("lock_screen", "Kunci Layar"),
     MUTE("mute", "Hening / Bisu")
 }
+
+data class WidgetSlotData(
+    val id: Int,
+    val type: String,
+    val size: String, // "SMALL" (2x2), "MEDIUM" (4x2), "COMPACT" (2x1), "LARGE" (4x4)
+    val row: Int, // 0..5
+    val align: String = "LEFT", // "LEFT" or "RIGHT"
+    val isEnabled: Boolean = true
+)
+
+data class HomeRowLayout(
+    val rowIndex: Int,
+    val widgets: List<WidgetSlotData>,
+    val apps: List<AppItem>,
+    val appStartIndex: Int
+)
+
 
 
 

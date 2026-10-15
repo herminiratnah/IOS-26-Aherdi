@@ -88,21 +88,8 @@ fun PodcastsApp(
             .navigationBarsPadding()
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            IOSStatusBar(
-                dynamicIslandData = dynamicIslandData,
-                onDismissDynamicIsland = { viewModel.dismissDynamicIsland() },
-                onOpenControlCenter = { viewModel.toggleControlCenter() },
-                onOpenNotificationCenter = { viewModel.toggleNotificationCenter() },
-                currentTime = currentTime,
-                batteryLevel = batteryLevel,
-                isBatteryCharging = isBatteryCharging,
-                isWifiConnected = isWifiConnected,
-                wifiSignalLevel = wifiSignalLevel,
-                cellularBars = cellularBars,
-                networkType = networkType,
-                isAirplaneMode = airplaneMode,
-                isDarkIcons = false
-            )
+            // Spacer for Single Global Status Bar
+            Spacer(modifier = Modifier.height(44.dp))
 
             // Tabs
             Row(

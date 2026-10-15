@@ -214,30 +214,21 @@ object IOSTintedBackgroundManager {
             } catch (_: Exception) {}
         }
 
-        // Tier 3: Root dumpsys fallback
-        try {
-            val windowFocusOut = RootExecutor.execute("dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'").second
-            if (windowFocusOut.isNotBlank()) {
-                val match = Regex("""([a-zA-Z0-9_.]+\.[a-zA-Z0-9_.]+)/""").find(windowFocusOut)
-                if (match != null) {
-                    val pkg = match.groupValues[1]
-                    if (pkg != selfPackageName && !pkg.contains("com.android.systemui")) {
-                        return@withContext pkg
+        // Tier 3: Root dumpsys fallback (lightweight single-line match)
+        if (RootExecutor.isRootAvailable()) {
+            try {
+                val windowFocusOut = RootExecutor.execute("dumpsys window windows 2>/dev/null | grep -m 1 'mCurrentFocus'").second
+                if (windowFocusOut.isNotBlank()) {
+                    val match = Regex("""([a-zA-Z0-9_.]+\.[a-zA-Z0-9_.]+)/""").find(windowFocusOut)
+                    if (match != null) {
+                        val pkg = match.groupValues[1]
+                        if (pkg != selfPackageName && !pkg.contains("com.android.systemui")) {
+                            return@withContext pkg
+                        }
                     }
                 }
-            }
-
-            val activityOut = RootExecutor.execute("dumpsys activity activities | grep -E 'mResumedActivity|topResumedActivity'").second
-            if (activityOut.isNotBlank()) {
-                val match = Regex("""([a-zA-Z0-9_.]+\.[a-zA-Z0-9_.]+)/""").find(activityOut)
-                if (match != null) {
-                    val pkg = match.groupValues[1]
-                    if (pkg != selfPackageName && !pkg.contains("com.android.systemui")) {
-                        return@withContext pkg
-                    }
-                }
-            }
-        } catch (_: Exception) {}
+            } catch (_: Exception) {}
+        }
         ""
     }
 }

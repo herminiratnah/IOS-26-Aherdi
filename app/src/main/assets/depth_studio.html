@@ -1,0 +1,1817 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>AI Depth Wallpaper Studio - 3-Layer Manual Canvas</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+    body {
+      background-color: #000;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+      overflow-x: hidden;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    .app-container {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 100vh;
+    }
+    @media (min-width: 820px) {
+      .app-container {
+        flex-direction: row;
+      }
+    }
+
+    /* Left Preview Canvas Area */
+    .preview-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 12px;
+      background: #000;
+      border-bottom: 1px solid #222;
+    }
+    @media (min-width: 820px) {
+      .preview-panel {
+        border-bottom: none;
+        border-right: 1px solid #222;
+        padding: 20px;
+      }
+    }
+
+    /* Top Layer Quick Selector Dock */
+    .layer-dock {
+      width: 100%;
+      max-width: 330px;
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 6px;
+      margin-bottom: 10px;
+      background: #141416;
+      padding: 4px;
+      border-radius: 14px;
+      border: 1px solid #28282C;
+    }
+    .layer-dock-btn {
+      padding: 8px 4px;
+      border-radius: 10px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: #8E8E93;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      transition: all 0.2s cubic-bezier(0.2, 0.9, 0.4, 1);
+    }
+    .layer-dock-btn.active {
+      background: #007AFF;
+      color: #FFF;
+      border-color: rgba(255, 255, 255, 0.25);
+      box-shadow: 0 4px 12px rgba(0, 122, 255, 0.35);
+    }
+    .layer-dock-btn span {
+      font-size: 9px;
+      font-weight: 500;
+      opacity: 0.85;
+    }
+
+    /* iPhone Device Shell */
+    .iphone-shell {
+      position: relative;
+      width: 290px;
+      height: 628px;
+      border-radius: 40px;
+      padding: 8px;
+      background: linear-gradient(180deg, #3C3C3E, #222224, #18181A);
+      box-shadow: 0 16px 45px rgba(0, 0, 0, 0.85), inset 0 0 2px rgba(255, 255, 255, 0.2);
+    }
+    @media (min-height: 800px) and (min-width: 360px) {
+      .iphone-shell {
+        width: 310px;
+        height: 672px;
+      }
+    }
+    .iphone-screen {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      border-radius: 32px;
+      overflow: hidden;
+      background: #000;
+      touch-action: none;
+    }
+    .dynamic-island {
+      position: absolute;
+      top: 9px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 40;
+      width: 96px;
+      height: 22px;
+      background: #000;
+      border-radius: 11px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 10px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      pointer-events: none;
+    }
+    .island-lens {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #111;
+      border: 1px solid #222;
+    }
+    .island-sensor {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: #007AFF;
+      opacity: 0.8;
+    }
+
+    #previewCanvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      cursor: grab;
+      touch-action: none;
+    }
+    #previewCanvas:active {
+      cursor: grabbing;
+    }
+
+    /* On-canvas feedback badge */
+    .canvas-hud {
+      position: absolute;
+      bottom: 48px;
+      left: 50%;
+      transform: translateX(-50%);
+      pointer-events: none;
+      padding: 5px 12px;
+      border-radius: 14px;
+      background: rgba(18, 18, 20, 0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      font-size: 11px;
+      color: #EEE;
+      white-space: nowrap;
+      z-index: 30;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+    }
+    .hud-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #34C759;
+    }
+
+    /* Floating Canvas Quick Controls */
+    .canvas-quick-bar {
+      position: absolute;
+      top: 40px;
+      right: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      z-index: 35;
+    }
+    .quick-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: rgba(28, 28, 30, 0.85);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      color: #FFF;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 3px 8px rgba(0,0,0,0.4);
+      transition: transform 0.15s;
+    }
+    .quick-btn:active {
+      transform: scale(0.9);
+    }
+
+    /* Right Studio Controls Panel */
+    .controls-panel {
+      width: 100%;
+      background: #101012;
+      display: flex;
+      flex-direction: column;
+    }
+    @media (min-width: 820px) {
+      .controls-panel {
+        width: 450px;
+      }
+    }
+    .tab-bar {
+      display: flex;
+      overflow-x: auto;
+      gap: 4px;
+      padding: 10px 12px;
+      background: #0A0A0C;
+      border-bottom: 1px solid #1E1E22;
+    }
+    .tab-btn {
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #8E8E93;
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.2s;
+    }
+    .tab-btn.active {
+      background: #007AFF;
+      color: #FFF;
+    }
+    .tab-btn-highlight {
+      background: linear-gradient(135deg, #34C759, #007AFF) !important;
+      color: #FFF !important;
+      font-weight: 800 !important;
+      box-shadow: 0 2px 10px rgba(52, 199, 89, 0.45);
+    }
+    .tab-content {
+      padding: 16px;
+      overflow-y: auto;
+      flex: 1;
+      display: none;
+    }
+    .tab-content.active {
+      display: block;
+    }
+
+    .section-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #FFF;
+      margin-bottom: 3px;
+    }
+    .section-desc {
+      font-size: 12px;
+      color: #8E8E93;
+      margin-bottom: 14px;
+      line-height: 1.4;
+    }
+
+    /* Cards */
+    .card {
+      background: #1C1C1E;
+      border: 1px solid #2C2C2E;
+      border-radius: 14px;
+      padding: 14px;
+      margin-bottom: 14px;
+    }
+    .form-group {
+      margin-bottom: 12px;
+    }
+    .form-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      font-weight: 600;
+      color: #CCC;
+      margin-bottom: 6px;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 6px;
+    }
+
+    .btn-choice {
+      padding: 10px;
+      border-radius: 10px;
+      background: #242426;
+      border: 1px solid #333;
+      color: #BBB;
+      cursor: pointer;
+      text-align: center;
+      font-size: 12px;
+      font-weight: 600;
+      transition: all 0.15s;
+    }
+    .btn-choice.active {
+      background: rgba(0, 122, 255, 0.22);
+      border-color: #007AFF;
+      color: #FFF;
+    }
+    .btn-choice span {
+      display: block;
+      font-size: 10px;
+      color: #777;
+      margin-top: 2px;
+    }
+    .btn-choice.active span {
+      color: #88BFFF;
+    }
+
+    /* Swatches */
+    .color-swatches {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .color-swatch {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      border: 2px solid #333;
+      cursor: pointer;
+      transition: transform 0.15s;
+    }
+    .color-swatch.active {
+      border-color: #007AFF;
+      transform: scale(1.15);
+      box-shadow: 0 0 10px rgba(0,122,255,0.6);
+    }
+
+    /* Primary and Secondary Action Buttons */
+    .btn-primary {
+      width: 100%;
+      padding: 14px;
+      border-radius: 14px;
+      background: #007AFF;
+      color: #FFF;
+      font-size: 14px;
+      font-weight: 700;
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      transition: opacity 0.2s;
+      margin-bottom: 10px;
+    }
+    .btn-emerald {
+      background: linear-gradient(135deg, #34C759, #28A745, #007AFF);
+      border: 1px solid rgba(52, 199, 89, 0.4);
+      box-shadow: 0 6px 18px rgba(52, 199, 89, 0.3);
+    }
+    .btn-secondary {
+      width: 100%;
+      padding: 12px;
+      border-radius: 12px;
+      background: #242426;
+      border: 1px solid #333;
+      color: #FFF;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+
+    .dropzone {
+      border: 2px dashed #444;
+      border-radius: 14px;
+      padding: 20px;
+      text-align: center;
+      background: rgba(255,255,255,0.02);
+      cursor: pointer;
+      margin-bottom: 14px;
+      transition: border-color 0.2s;
+    }
+    .dropzone:hover {
+      border-color: #007AFF;
+    }
+    .dropzone-icon {
+      font-size: 28px;
+      margin-bottom: 4px;
+    }
+
+    /* Toggle switches */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 0;
+      font-size: 13px;
+      color: #DDD;
+    }
+    .switch-pill {
+      position: relative;
+      width: 44px;
+      height: 24px;
+      background: #39393D;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .switch-pill.active {
+      background: #34C759;
+    }
+    .switch-thumb {
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #FFF;
+      transition: transform 0.2s;
+    }
+    .switch-pill.active .switch-thumb {
+      transform: translateX(20px);
+    }
+  </style>
+</head>
+<body>
+  <div class="app-container">
+    <!-- LEFT: iPhone Device Canvas -->
+    <div class="preview-panel">
+      <!-- 3-Layer Quick Dock -->
+      <div class="layer-dock">
+        <button id="dockL1" class="layer-dock-btn" onclick="selectLayer(1)">
+          <div>🌄 Layer 1</div>
+          <span>Background</span>
+        </button>
+        <button id="dockL2" class="layer-dock-btn active" onclick="selectLayer(2)">
+          <div>🕒 Layer 2</div>
+          <span>Jam 3D</span>
+        </button>
+        <button id="dockL3" class="layer-dock-btn" onclick="selectLayer(3)">
+          <div>✂️ Layer 3</div>
+          <span>Foreground PNG</span>
+        </button>
+        <button class="layer-dock-btn" style="background: linear-gradient(135deg, rgba(52,199,89,0.35), rgba(0,122,255,0.35)); border: 1px solid #34C759;" onclick="exportWallpaper('set_wallpaper_now')">
+          <div style="color: #34C759; font-weight:800;">✨ Pasang</div>
+          <span style="color:#FFF;">Lock Screen</span>
+        </button>
+      </div>
+
+      <!-- iPhone Frame Shell -->
+      <div class="iphone-shell">
+        <div class="iphone-screen">
+          <div class="dynamic-island">
+            <div class="island-lens"></div>
+            <div class="island-sensor"></div>
+          </div>
+
+          <!-- The Real 3-Layer Interactive Canvas -->
+          <canvas id="previewCanvas" width="360" height="780"></canvas>
+
+          <!-- On-Canvas Live HUD -->
+          <div class="canvas-hud" id="canvasHud">
+            <div class="hud-dot"></div>
+            <span id="hudText">Geser langsung di layar untuk edit Jam</span>
+          </div>
+
+          <!-- Quick Scale / Reset Floating Controls -->
+          <div class="canvas-quick-bar">
+            <button class="quick-btn" title="Perbesar Layer Aktif" onclick="scaleActiveLayer(1.1)">➕</button>
+            <button class="quick-btn" title="Perkecil Layer Aktif" onclick="scaleActiveLayer(0.9)">➖</button>
+            <button class="quick-btn" title="Reset Posisi Layer" onclick="resetActiveLayer()">🔄</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sticky Quick Action Button directly under canvas -->
+      <div style="margin-top: 10px; width: 290px; max-width: 100%;">
+        <button class="btn-primary btn-emerald" style="width: 100%; padding: 12px 14px; margin: 0; box-shadow: 0 4px 18px rgba(52,199,89,0.4);" onclick="exportWallpaper('set_wallpaper_now')">
+          <div>
+            <div style="font-weight:800; font-size:13px;">✨ Simpan & Pasang Jadi Lock Screen</div>
+            <div style="font-size:10px; opacity:0.9;">Aktifkan 3-Layer Depth Effect</div>
+          </div>
+          <span style="font-size:20px;">📲</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- RIGHT: Studio Layer Controls -->
+    <div class="controls-panel">
+      <!-- Top Tab Bar -->
+      <div class="tab-bar">
+        <button id="tabBtn-1" class="tab-btn" onclick="switchTab(1)">🌄 1. Background</button>
+        <button id="tabBtn-2" class="tab-btn active" onclick="switchTab(2)">🕒 2. Jam & Font</button>
+        <button id="tabBtn-3" class="tab-btn" onclick="switchTab(3)">✂️ 3. Foreground PNG</button>
+        <button id="tabBtn-export" class="tab-btn tab-btn-highlight" onclick="switchTab('export')">✨ 4. Pasang ke Lock Screen</button>
+      </div>
+
+      <!-- TAB 1: BACKGROUND LAYER (Layer 1) -->
+      <div id="tab-1" class="tab-content">
+        <div class="section-title">Layer 1: Foto Background</div>
+        <div class="section-desc">Pilih atau unggah foto untuk latar belakang. Geser & perbesar foto langsung di kanvas.</div>
+
+        <input type="file" id="bgPhotoInput" accept="image/jpeg,image/png,image/webp" style="display:none;" onchange="handleBgFileUpload(event)">
+        <div class="dropzone" onclick="document.getElementById('bgPhotoInput').click()">
+          <div class="dropzone-icon">🌄</div>
+          <div style="font-weight:700; font-size:13px;">Unggah Foto Background Sendiri</div>
+          <div style="font-size:11px; color:#888; margin-top:3px;">Format JPG, PNG, atau WebP</div>
+        </div>
+
+        <div class="card">
+          <div class="form-label">Atau Pilih Preset Pemandangan:</div>
+          <div class="grid-3">
+            <button class="btn-choice active" onclick="loadPreset('mountain', 'Alpine Peak')">
+              ⛰️ Alpine
+              <span>Gunung</span>
+            </button>
+            <button class="btn-choice" onclick="loadPreset('dunes', 'Golden Dunes')">
+              🏜️ Dunes
+              <span>Gurun</span>
+            </button>
+            <button class="btn-choice" onclick="loadPreset('sunset', 'Sunset Ocean')">
+              🌅 Sunset
+              <span>Senja</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="form-label">Panduan Touch Gestures di Kanvas:</div>
+          <div style="font-size:11px; color:#AAA; line-height:1.5;">
+            • <b>Geser 1 jari di layar:</b> Memindahkan posisi foto background.<br>
+            • <b>Pinch 2 jari / Tombol ➕ ➖ di pojok kanan:</b> Zoom foto.<br>
+            • Semua perubahan 100% langsung di kanvas tanpa slider vertikal/horizontal.
+          </div>
+        </div>
+
+        <button class="btn-primary btn-emerald" style="margin-top: 12px;" onclick="exportWallpaper('set_wallpaper_now')">
+          <div>
+            <div style="font-weight:700;">✨ Simpan & Pasang Jadi Lock Screen</div>
+            <div style="font-size:11px; opacity:0.9;">Langsung terapkan hasil ke Layar Kunci</div>
+          </div>
+          <span style="font-size:22px;">📲</span>
+        </button>
+      </div>
+
+      <!-- TAB 2: CLOCK & WIDGETS LAYER (Layer 2) -->
+      <div id="tab-2" class="tab-content active">
+        <div class="section-title">Layer 2: Tampilan Jam & Tipografi 3D</div>
+        <div class="section-desc">Jam terletak di belakang subjek (3D Depth). Geser langsung di layar, pinch 2 jari untuk zoom, atau gunakan kontrol di bawah!</div>
+
+        <!-- Clock Format -->
+        <div class="card">
+          <div class="form-label">Format Tata Letak Jam:</div>
+          <div class="grid-2">
+            <button id="btnFmtStacked" class="btn-choice active" onclick="setClockFormat('stacked')">
+              <div style="font-size:18px; font-weight:bold; line-height:1.1;">09<br>41</div>
+              <span>2-Baris Stacked (Vogue)</span>
+            </button>
+            <button id="btnFmtHoriz" class="btn-choice" onclick="setClockFormat('horizontal')">
+              <div style="font-size:18px; font-weight:bold; line-height:2.2;">09:41</div>
+              <span>1-Baris Standar iOS</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Clock Size & Free Transform Controls -->
+        <div class="card">
+          <div class="form-label">
+            <span>Ukuran Jam & Free Transform:</span>
+            <span id="clockSizeLabel" style="color:#007AFF; font-weight:700;">104px</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+            <button class="btn-choice" style="padding:6px 12px; width:40px; font-size:14px;" onclick="stepClockSize(-4)">➖</button>
+            <input type="range" id="clockSizeRange" min="48" max="160" value="104" style="flex:1; accent-color:#007AFF;" oninput="setClockSize(parseInt(this.value))">
+            <button class="btn-choice" style="padding:6px 12px; width:40px; font-size:14px;" onclick="stepClockSize(4)">➕</button>
+          </div>
+          <div class="form-label">
+            <span>Posisi Jam (Sentuh di Layar atau Geser Slider):</span>
+          </div>
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:10px;">
+            <div>
+              <div style="font-size:11px; color:#888; margin-bottom:3px;">Horisontal (X)</div>
+              <input type="range" id="clockPosXRange" min="15" max="85" value="50" style="width:100%; accent-color:#007AFF;" oninput="setClockPosX(parseInt(this.value))">
+            </div>
+            <div>
+              <div style="font-size:11px; color:#888; margin-bottom:3px;">Vertikal (Y)</div>
+              <input type="range" id="clockPosYRange" min="8" max="65" value="22" style="width:100%; accent-color:#007AFF;" oninput="setClockPosY(parseInt(this.value))">
+            </div>
+          </div>
+          <div class="grid-2">
+            <button class="btn-choice" style="padding:8px;" onclick="centerClockHorizontally()">📍 Tengahkan Jam</button>
+            <button class="btn-choice" style="padding:8px;" onclick="resetClockTransform()">🔄 Reset Ukuran & Posisi</button>
+          </div>
+          <div style="font-size:11px; color:#AAA; margin-top:8px; line-height:1.4;">
+            💡 <b>Pinch-to-Zoom:</b> Cubit / rentangkan 2 jari langsung di layar kanvas untuk zoom in & zoom out ukuran jam secara presisi!
+          </div>
+        </div>
+
+        <!-- Creative Font Styles -->
+        <div class="card">
+          <div class="form-label">Pilihan Gaya Font Kreatif (10 Koleksi):</div>
+          <div class="grid-2">
+            <button class="btn-choice font-btn active" onclick="setClockFont('system-ui, -apple-system, sans-serif', 'iOS Modern')">iOS Modern</button>
+            <button class="btn-choice font-btn" onclick="setClockFont('Bodoni Moda, Didot, Georgia, serif', 'Bodoni Serif')">Bodoni Serif</button>
+            <button class="btn-choice font-btn" onclick="setClockFont('Cormorant Garamond, serif', 'Cormorant')">Cormorant</button>
+            <button class="btn-choice font-btn" onclick="setClockFont('Playfair Display, serif', 'Playfair')">Playfair Display</button>
+            <button class="btn-choice font-btn" onclick="setClockFont('Courier New, monospace', 'Tech Monospace')">Monospace</button>
+            <button class="btn-choice font-btn" onclick="setClockFont('Outfit, sans-serif', 'iOS Rounded')">Rounded Slick</button>
+            <button class="btn-choice font-btn" onclick="setClockFont('Cormorant Garamond, serif', 'Minimal Thin')">Minimal Thin</button>
+            <button class="btn-choice font-btn" onclick="setClockFont('Brush Script MT, cursive, serif', 'Elegant Script')">Elegant Script</button>
+            <button class="btn-choice font-btn" onclick="setClockFont('Impact, Arial Black, sans-serif', 'Retro Heavy')">Retro Heavy</button>
+            <button class="btn-choice font-btn" onclick="setClockFont('Courier New, monospace', 'Cyber Stencil')">Cyber Stencil</button>
+          </div>
+        </div>
+
+        <!-- Clock Color & Tint -->
+        <div class="card">
+          <div class="form-label">
+            <span>Pilihan Warna & Tint Jam:</span>
+            <span id="colorHexLabel" style="color:#FFF; font-family:monospace; font-size:11px;">#FFFFFF</span>
+          </div>
+          <div class="color-swatches" style="margin-bottom:12px;">
+            <div class="color-swatch active" style="background:#FFFFFF;" onclick="setClockColor('#FFFFFF')"></div>
+            <div class="color-swatch" style="background:#FFF7EA;" onclick="setClockColor('#FFF7EA')"></div>
+            <div class="color-swatch" style="background:#FFD54F;" onclick="setClockColor('#FFD54F')"></div>
+            <div class="color-swatch" style="background:#FF9500;" onclick="setClockColor('#FF9500')"></div>
+            <div class="color-swatch" style="background:#FF2D55;" onclick="setClockColor('#FF2D55')"></div>
+            <div class="color-swatch" style="background:#FF3B30;" onclick="setClockColor('#FF3B30')"></div>
+            <div class="color-swatch" style="background:#32ADE6;" onclick="setClockColor('#32ADE6')"></div>
+            <div class="color-swatch" style="background:#007AFF;" onclick="setClockColor('#007AFF')"></div>
+            <div class="color-swatch" style="background:#5856D6;" onclick="setClockColor('#5856D6')"></div>
+            <div class="color-swatch" style="background:#AF52DE;" onclick="setClockColor('#AF52DE')"></div>
+            <div class="color-swatch" style="background:#34C759;" onclick="setClockColor('#34C759')"></div>
+            <div class="color-swatch" style="background:#30D158;" onclick="setClockColor('#30D158')"></div>
+            <div class="color-swatch" style="background:#E5E5EA;" onclick="setClockColor('#E5E5EA')"></div>
+            <div class="color-swatch" style="background:#8E8E93;" onclick="setClockColor('#8E8E93')"></div>
+            <div class="color-swatch" style="background:#FFCC00;" onclick="setClockColor('#FFCC00')"></div>
+            <div class="color-swatch" style="background:#FF8C42;" onclick="setClockColor('#FF8C42')"></div>
+          </div>
+          <!-- Custom Color Tint Wheel & Hue Spectrum Slider -->
+          <div style="background:#242426; border-radius:10px; padding:10px; border:1px solid #333;">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+              <span style="font-size:12px; font-weight:600; color:#DDD;">🎨 Custom Tint / Color Wheel:</span>
+              <input type="color" id="customColorPicker" value="#FFFFFF" onchange="setClockColor(this.value)" style="width:28px; height:28px; border-radius:6px; border:1px solid #444; cursor:pointer; background:none;">
+            </div>
+            <div style="font-size:11px; color:#888; margin-bottom:4px;">Slider Tint Spektrum Penuh (Hue 0° - 360°):</div>
+            <input type="range" id="hueRange" min="0" max="360" value="0" style="width:100%; background: linear-gradient(to right, #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%); height:8px; border-radius:4px; appearance:none; -webkit-appearance:none; cursor:pointer;" oninput="setClockHue(this.value)">
+          </div>
+        </div>
+
+        <!-- Font Weight & Opacity -->
+        <div class="card">
+          <div class="form-label">Ketebalan Font (Weight):</div>
+          <div class="grid-3" style="margin-bottom:10px;">
+            <button class="btn-choice" onclick="setClockWeight(300)">Tipis (300)</button>
+            <button class="btn-choice active" onclick="setClockWeight(600)">Tebal (600)</button>
+            <button class="btn-choice" onclick="setClockWeight(800)">Extra (800)</button>
+          </div>
+
+          <div class="form-label">Transparansi Jam:</div>
+          <div class="grid-3">
+            <button class="btn-choice active" onclick="setClockOpacity(1.0)">100%</button>
+            <button class="btn-choice" onclick="setClockOpacity(0.85)">85%</button>
+            <button class="btn-choice" onclick="setClockOpacity(0.65)">65%</button>
+          </div>
+        </div>
+
+        <!-- Lock Screen Widgets -->
+        <div class="card">
+          <div class="form-label">Sinkronisasi Lock Screen Widgets:</div>
+          <div class="toggle-row">
+            <span>☀️ Weather Widget (30° Jakarta)</span>
+            <div id="togWeather" class="switch-pill" onclick="toggleWidget('weather')"><div class="switch-thumb"></div></div>
+          </div>
+          <div class="toggle-row">
+            <span>🔋 Battery Widget (100%)</span>
+            <div id="togBattery" class="switch-pill" onclick="toggleWidget('battery')"><div class="switch-thumb"></div></div>
+          </div>
+          <div class="toggle-row">
+            <span>📅 Calendar Widget (No Events)</span>
+            <div id="togCalendar" class="switch-pill" onclick="toggleWidget('calendar')"><div class="switch-thumb"></div></div>
+          </div>
+        </div>
+
+        <button class="btn-primary btn-emerald" style="margin-top: 12px;" onclick="exportWallpaper('set_wallpaper_now')">
+          <div>
+            <div style="font-weight:700;">✨ Simpan & Pasang Jadi Lock Screen</div>
+            <div style="font-size:11px; opacity:0.9;">Langsung terapkan hasil ke Layar Kunci</div>
+          </div>
+          <span style="font-size:22px;">📲</span>
+        </button>
+      </div>
+
+      <!-- TAB 3: FOREGROUND PNG LAYER (Layer 3) -->
+      <div id="tab-3" class="tab-content">
+        <div class="section-title">Layer 3: Subjek Foreground PNG</div>
+        <div class="section-desc">Layer transparan di depan jam. Anda bisa unggah file PNG transparan sendiri atau gunakan AI Cutout otomatis!</div>
+
+        <input type="file" id="fgPhotoInput" accept="image/png,image/*" style="display:none;" onchange="handleFgFileUpload(event)">
+        <div class="dropzone" onclick="document.getElementById('fgPhotoInput').click()">
+          <div class="dropzone-icon">✂️</div>
+          <div style="font-weight:700; font-size:13px;">Unggah File PNG Transparan</div>
+          <div style="font-size:11px; color:#888; margin-top:3px;">Subjek orang, hewan, atau objek berlatar transparan</div>
+        </div>
+
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+              <div style="font-size:13px; font-weight:700;">Atau Gunakan AI Cutout Otomatis</div>
+              <div style="font-size:11px; color:#888;">Ekstrak subjek dari foto Layer 1</div>
+            </div>
+            <button class="btn-choice active" style="padding:8px 14px;" onclick="runAiCutout()">⚡ Jalankan AI</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="form-label">Aksi & Posisi Subjek di Kanvas:</div>
+          <div class="grid-2">
+            <button class="btn-secondary" style="justify-content:center;" onclick="resetFgTransform()">📍 Tengahkan Subjek</button>
+            <button class="btn-secondary" style="justify-content:center;" onclick="flipFgHorizontal()">↔️ Cermin (Flip)</button>
+          </div>
+          <div style="font-size:11px; color:#AAA; margin-top:8px; line-height:1.4;">
+            👉 <b>Geser langsung di layar:</b> Pindahkan posisi subjek transparan agar menutupi sebagian angka jam secara pas dan dramatis!
+          </div>
+        </div>
+
+        <button class="btn-primary btn-emerald" style="margin-top: 12px;" onclick="exportWallpaper('set_wallpaper_now')">
+          <div>
+            <div style="font-weight:700;">✨ Simpan & Pasang Jadi Lock Screen</div>
+            <div style="font-size:11px; opacity:0.9;">Langsung terapkan hasil ke Layar Kunci</div>
+          </div>
+          <span style="font-size:22px;">📲</span>
+        </button>
+      </div>
+
+      <!-- TAB 4: EXPORT & SYNC LOCKSCREEN -->
+      <div id="tab-export" class="tab-content">
+        <div class="section-title">Pasang & Sinkronkan ke Lock Screen</div>
+        <div class="section-desc">Hasil akan 100% tersinkronisasi dengan layar kunci dan menu Settings &gt; Wallpaper &gt; Customize.</div>
+
+        <!-- Primary 1-Click Set as Lock Screen -->
+        <button class="btn-primary btn-emerald" onclick="exportWallpaper('set_wallpaper_now')">
+          <div>
+            <div style="font-weight:700;">✨ Simpan & Pasang Jadi Lock Screen</div>
+            <div style="font-size:11px; opacity:0.95; margin-top:2px;">Aktifkan 3-Layer Depth Effect di Layar Kunci</div>
+          </div>
+          <span style="font-size:24px;">📲</span>
+        </button>
+
+        <button class="btn-primary" onclick="exportWallpaper('with_clock')">
+          <div>
+            <div style="font-weight:700;">Unduh Wallpaper Lengkap + Jam</div>
+            <div style="font-size:11px; opacity:0.85; margin-top:2px;">Simpan ke Galeri Foto perangkat</div>
+          </div>
+          <span style="font-size:20px;">⬇️</span>
+        </button>
+
+        <button class="btn-secondary" onclick="exportWallpaper('clean_photo')">
+          <div>
+            <div style="font-weight:600;">Unduh Foto Background Saja</div>
+            <div style="font-size:11px; color:#888;">Foto Layer 1 resolusi tinggi</div>
+          </div>
+          <span style="font-size:16px;">🖼️</span>
+        </button>
+
+        <button class="btn-secondary" onclick="exportWallpaper('foreground_only')">
+          <div>
+            <div style="font-weight:600;">Unduh Objek Transparan Saja (PNG)</div>
+            <div style="font-size:11px; color:#888;">Layer 3 cutout murni</div>
+          </div>
+          <span style="font-size:16px;">✂️</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- OFFLINE CANVAS BUFFERS -->
+  <canvas id="baseCanvas" width="720" height="1560" style="display:none;"></canvas>
+  <canvas id="fgCanvas" width="720" height="1560" style="display:none;"></canvas>
+
+  <script>
+    // ==========================================
+    // 3-LAYER STATE ENGINE
+    // ==========================================
+    let activeLayer = 2; // 1 = Background, 2 = Clock, 3 = Foreground PNG
+
+    // Layer 1: Background State
+    let baseImg = null;
+    let bgScale = 1.0;
+    let bgOffset = { x: 0, y: 0 };
+    let bgFileName = 'Alpine_Peak.jpg';
+
+    // Layer 2: Clock & Widgets State
+    let clockFormat = 'stacked'; // 'stacked' | 'horizontal'
+    let clockFont = 'system-ui, -apple-system, sans-serif';
+    let clockFontName = 'iOS Modern';
+    let clockColor = '#FFFFFF';
+    let clockSize = 104;
+    let clockWeight = 600;
+    let clockOpacity = 1.0;
+    let clockPos = { x: 0.5, y: 0.22 }; // Normalized (0..1) on preview
+    let showWeather = false;
+    let showBattery = false;
+    let showCalendar = false;
+
+    // Layer 3: Foreground Subject (Cutout) State
+    let fgImg = null;
+    let hasFg = false;
+    let fgScale = 1.0;
+    let fgOffset = { x: 0, y: 0 };
+    let fgFlipped = false;
+
+    // Canvas DOM Elements
+    const previewCanvas = document.getElementById('previewCanvas');
+    const pCtx = previewCanvas.getContext('2d');
+    const baseCanvas = document.getElementById('baseCanvas');
+    const bCtx = baseCanvas.getContext('2d', { willReadFrequently: true });
+    const fgCanvas = document.getElementById('fgCanvas');
+    const fCtx = fgCanvas.getContext('2d', { willReadFrequently: true });
+
+    // Interaction Gestures State
+    let isDragging = false;
+    let dragStartPos = { x: 0, y: 0 };
+    let isResizing = false;
+    let resizeHandleDist = 0;
+    let initialPinchDist = 0;
+    let showBoundingBox = false;
+    let hudTimer = null;
+
+    // ==========================================
+    // LAYER SELECTION & TABS
+    // ==========================================
+    function selectLayer(layerNum) {
+      activeLayer = layerNum;
+      document.querySelectorAll('.layer-dock-btn').forEach((b, i) => {
+        b.classList.toggle('active', (i + 1) === layerNum);
+      });
+      switchTab(layerNum);
+
+      const names = { 1: 'Background (L1)', 2: 'Jam 3D (L2)', 3: 'Foreground PNG (L3)' };
+      setHud(`Aktif: ${names[layerNum]} — Geser langsung di layar!`);
+      showBoundingBox = true;
+      renderPreview();
+    }
+
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+
+      const btn = document.getElementById(`tabBtn-${tabId}`);
+      if (btn) btn.classList.add('active');
+      const content = document.getElementById(`tab-${tabId}`);
+      if (content) content.classList.add('active');
+
+      if (typeof tabId === 'number') {
+        activeLayer = tabId;
+        document.querySelectorAll('.layer-dock-btn').forEach((b, i) => {
+          b.classList.toggle('active', (i + 1) === tabId);
+        });
+      }
+    }
+
+    function setHud(text) {
+      const hud = document.getElementById('canvasHud');
+      const hudText = document.getElementById('hudText');
+      hudText.innerText = text;
+      hud.style.opacity = '1';
+      clearTimeout(hudTimer);
+      hudTimer = setTimeout(() => {
+        if (!isDragging) hud.style.opacity = '0.75';
+      }, 2500);
+    }
+
+    // ==========================================
+    // DEFAULT SYNTHETIC MOUNTAIN LANDSCAPE
+    // ==========================================
+    function initDefaultLandscape() {
+      const w = 720;
+      const h = 1560;
+      baseCanvas.width = w;
+      baseCanvas.height = h;
+
+      // Sky Gradient
+      const skyGrad = bCtx.createLinearGradient(0, 0, 0, h);
+      skyGrad.addColorStop(0, '#0D1B2A');
+      skyGrad.addColorStop(0.3, '#1B263B');
+      skyGrad.addColorStop(0.55, '#415A77');
+      skyGrad.addColorStop(0.72, '#E0A96D');
+      skyGrad.addColorStop(1, '#1A1A1A');
+      bCtx.fillStyle = skyGrad;
+      bCtx.fillRect(0, 0, w, h);
+
+      // Glowing Sun
+      bCtx.fillStyle = 'rgba(255, 235, 190, 0.96)';
+      bCtx.beginPath();
+      bCtx.arc(w / 2, h * 0.36, 68, 0, Math.PI * 2);
+      bCtx.fill();
+
+      // Sun Halo
+      const sunGrad = bCtx.createRadialGradient(w / 2, h * 0.36, 68, w / 2, h * 0.36, 250);
+      sunGrad.addColorStop(0, 'rgba(255, 200, 100, 0.42)');
+      sunGrad.addColorStop(1, 'rgba(255, 100, 50, 0)');
+      bCtx.fillStyle = sunGrad;
+      bCtx.beginPath();
+      bCtx.arc(w / 2, h * 0.36, 250, 0, Math.PI * 2);
+      bCtx.fill();
+
+      // Mountain Ridges (Layer 1 Base)
+      bCtx.fillStyle = '#141824';
+      bCtx.beginPath();
+      bCtx.moveTo(0, h * 0.58);
+      bCtx.lineTo(w * 0.25, h * 0.44);
+      bCtx.lineTo(w * 0.52, h * 0.37);
+      bCtx.lineTo(w * 0.78, h * 0.47);
+      bCtx.lineTo(w, h * 0.42);
+      bCtx.lineTo(w, h);
+      bCtx.lineTo(0, h);
+      bCtx.closePath();
+      bCtx.fill();
+
+      // Create Synthetic Foreground Subject (Mountain Cutout for Layer 3)
+      fgCanvas.width = w;
+      fgCanvas.height = h;
+      fCtx.clearRect(0, 0, w, h);
+      fCtx.fillStyle = '#0B0F19';
+      fCtx.beginPath();
+      fCtx.moveTo(0, h * 0.64);
+      fCtx.lineTo(w * 0.32, h * 0.50);
+      fCtx.lineTo(w * 0.65, h * 0.58);
+      fCtx.lineTo(w, h * 0.52);
+      fCtx.lineTo(w, h);
+      fCtx.lineTo(0, h);
+      fCtx.closePath();
+      fCtx.fill();
+
+      hasFg = true;
+
+      // Assign Base Image
+      const img = new Image();
+      img.src = baseCanvas.toDataURL('image/jpeg', 0.92);
+      img.onload = () => {
+        baseImg = img;
+        renderPreview();
+      };
+    }
+
+    // ==========================================
+    // LAYER 1: BACKGROUND HANDLERS
+    // ==========================================
+    function handleBgFileUpload(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      setHud('Memuat Foto Background...');
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const img = new Image();
+        img.onload = () => {
+          baseImg = img;
+          bgScale = 1.0;
+          bgOffset = { x: 0, y: 0 };
+          bgFileName = file.name;
+
+          baseCanvas.width = img.naturalWidth || 720;
+          baseCanvas.height = img.naturalHeight || 1280;
+          bCtx.clearRect(0, 0, baseCanvas.width, baseCanvas.height);
+          bCtx.drawImage(img, 0, 0);
+
+          setHud('✅ Background diperbarui! Geser di layar.');
+          selectLayer(1);
+          renderPreview();
+        };
+        img.src = evt.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function loadPreset(theme, label) {
+      setHud(`Memuat preset ${label}...`);
+      initDefaultLandscape();
+      setHud(`✅ Preset ${label} aktif!`);
+    }
+
+    // ==========================================
+    // LAYER 3: FOREGROUND PNG HANDLERS
+    // ==========================================
+    function handleFgFileUpload(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      setHud('Memuat Foreground PNG...');
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const img = new Image();
+        img.onload = () => {
+          fgImg = img;
+          hasFg = true;
+          fgScale = 1.0;
+          fgOffset = { x: 0, y: 0 };
+
+          fgCanvas.width = img.naturalWidth || 720;
+          fgCanvas.height = img.naturalHeight || 1280;
+          fCtx.clearRect(0, 0, fgCanvas.width, fgCanvas.height);
+          fCtx.drawImage(img, 0, 0);
+
+          setHud('✅ PNG transparan dimuat! Geser langsung di layar.');
+          selectLayer(3);
+          renderPreview();
+        };
+        img.src = evt.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function runAiCutout() {
+      if (!baseImg) return;
+      setHud('AI: Mengekstrak subjek utama...');
+      setTimeout(() => {
+        try {
+          const w = baseCanvas.width;
+          const h = baseCanvas.height;
+          fgCanvas.width = w;
+          fgCanvas.height = h;
+
+          const imgData = bCtx.getImageData(0, 0, w, h);
+          const data = imgData.data;
+
+          const fgImgData = fCtx.createImageData(w, h);
+          const fgData = fgImgData.data;
+
+          // Background color sampling
+          let bgR = 0, bgG = 0, bgB = 0, sampleCount = 0;
+          const sampleH = Math.floor(h * 0.16);
+          for (let y = 0; y < sampleH; y += 4) {
+            for (let x = 0; x < w; x += 4) {
+              const idx = (y * w + x) * 4;
+              bgR += data[idx];
+              bgG += data[idx + 1];
+              bgB += data[idx + 2];
+              sampleCount++;
+            }
+          }
+          bgR /= (sampleCount || 1);
+          bgG /= (sampleCount || 1);
+          bgB /= (sampleCount || 1);
+
+          for (let y = 0; y < h; y++) {
+            const yNorm = y / h;
+            for (let x = 0; x < w; x++) {
+              const idx = (y * w + x) * 4;
+              const r = data[idx];
+              const g = data[idx + 1];
+              const b = data[idx + 2];
+
+              const colorDiff = Math.sqrt(
+                Math.pow(r - bgR, 2) + Math.pow(g - bgG, 2) + Math.pow(b - bgB, 2)
+              ) / 441.67;
+
+              let alpha = 0;
+              if (yNorm > 0.52) {
+                alpha = 255;
+              } else if (yNorm > 0.15) {
+                const heightFactor = (yNorm - 0.15) / 0.37;
+                const score = (colorDiff * 0.65) + (heightFactor * 0.55);
+                if (score > 0.40) {
+                  alpha = Math.min(255, Math.floor(((score - 0.40) / 0.3) * 255));
+                }
+              }
+
+              fgData[idx] = r;
+              fgData[idx + 1] = g;
+              fgData[idx + 2] = b;
+              fgData[idx + 3] = alpha;
+            }
+          }
+
+          fCtx.putImageData(fgImgData, 0, 0);
+          hasFg = true;
+          fgScale = 1.0;
+          fgOffset = { x: 0, y: 0 };
+          setHud('✅ AI berhasil memisahkan subjek ke Layer 3!');
+          selectLayer(3);
+          renderPreview();
+        } catch (err) {
+          console.error(err);
+          setHud('Gagal menjalankan AI segmentation.');
+        }
+      }, 60);
+    }
+
+    function resetFgTransform() {
+      fgOffset = { x: 0, y: 0 };
+      fgScale = 1.0;
+      setHud('Subjek Layer 3 ditengahkan');
+      renderPreview();
+    }
+
+    function flipFgHorizontal() {
+      fgFlipped = !fgFlipped;
+      setHud(fgFlipped ? 'Subjek dicerminkan' : 'Subjek normal');
+      renderPreview();
+    }
+
+    // ==========================================
+    // LAYER 2: CLOCK STYLING & FREE TRANSFORM SETTERS
+    // ==========================================
+    function setClockFormat(fmt) {
+      clockFormat = fmt;
+      document.getElementById('btnFmtStacked').classList.toggle('active', fmt === 'stacked');
+      document.getElementById('btnFmtHoriz').classList.toggle('active', fmt === 'horizontal');
+      renderPreview();
+    }
+
+    function setClockFont(fontFamily, name) {
+      clockFont = fontFamily;
+      clockFontName = name;
+      document.querySelectorAll('.font-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.innerText.includes(name));
+      });
+      renderPreview();
+    }
+
+    function setClockColor(color) {
+      clockColor = color;
+      const hexLabel = document.getElementById('colorHexLabel');
+      if (hexLabel) hexLabel.innerText = color.toUpperCase();
+      const picker = document.getElementById('customColorPicker');
+      if (picker && color.startsWith('#')) picker.value = color;
+
+      document.querySelectorAll('.color-swatch').forEach(sw => {
+        sw.classList.toggle('active', sw.style.backgroundColor.toLowerCase() === color.toLowerCase());
+      });
+      renderPreview();
+    }
+
+    function setClockHue(hue) {
+      const rgb = hslToRgb(hue / 360, 1.0, 0.55);
+      const hex = rgbToHex(rgb[0], rgb[1], rgb[2]);
+      setClockColor(hex);
+    }
+
+    function hslToRgb(h, s, l) {
+      let r, g, b;
+      if (s === 0) {
+        r = g = b = l;
+      } else {
+        const hue2rgb = (p, q, t) => {
+          if (t < 0) t += 1;
+          if (t > 1) t -= 1;
+          if (t < 1/6) return p + (q - p) * 6 * t;
+          if (t < 1/2) return q;
+          if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+          return p;
+        };
+        const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+        const p = 2 * l - q;
+        r = hue2rgb(p, q, h + 1/3);
+        g = hue2rgb(p, q, h);
+        b = hue2rgb(p, q, h - 1/3);
+      }
+      return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+    }
+
+    function rgbToHex(r, g, b) {
+      return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+    }
+
+    function setClockSize(newSize) {
+      clockSize = Math.max(48, Math.min(160, Math.round(newSize)));
+      const slider = document.getElementById('clockSizeRange');
+      if (slider) slider.value = clockSize;
+      const label = document.getElementById('clockSizeLabel');
+      if (label) label.innerText = `${clockSize}px`;
+      setHud(`🕒 Ukuran Jam: ${clockSize}px`);
+      showBoundingBox = true;
+      renderPreview();
+    }
+
+    function stepClockSize(delta) {
+      setClockSize(clockSize + delta);
+    }
+
+    function setClockPosX(valPercent) {
+      clockPos.x = valPercent / 100;
+      showBoundingBox = true;
+      renderPreview();
+    }
+
+    function setClockPosY(valPercent) {
+      clockPos.y = valPercent / 100;
+      showBoundingBox = true;
+      renderPreview();
+    }
+
+    function centerClockHorizontally() {
+      clockPos.x = 0.5;
+      const slider = document.getElementById('clockPosXRange');
+      if (slider) slider.value = 50;
+      setHud('Jam ditengahkan secara horisontal');
+      showBoundingBox = true;
+      renderPreview();
+    }
+
+    function resetClockTransform() {
+      clockPos = { x: 0.5, y: 0.22 };
+      clockSize = 104;
+      const sizeSlider = document.getElementById('clockSizeRange');
+      if (sizeSlider) sizeSlider.value = 104;
+      const sizeLabel = document.getElementById('clockSizeLabel');
+      if (sizeLabel) sizeLabel.innerText = '104px';
+      const xSlider = document.getElementById('clockPosXRange');
+      if (xSlider) xSlider.value = 50;
+      const ySlider = document.getElementById('clockPosYRange');
+      if (ySlider) ySlider.value = 22;
+      setHud('Posisi & ukuran jam direset');
+      showBoundingBox = true;
+      renderPreview();
+    }
+
+    function setClockWeight(w) {
+      clockWeight = w;
+      document.querySelectorAll('#tab-2 .grid-3:nth-of-type(1) .btn-choice').forEach((b, i) => {
+        b.classList.toggle('active', (i === 0 && w === 300) || (i === 1 && w === 600) || (i === 2 && w === 800));
+      });
+      renderPreview();
+    }
+
+    function setClockOpacity(op) {
+      clockOpacity = op;
+      renderPreview();
+    }
+
+    function toggleWidget(type) {
+      if (type === 'weather') {
+        showWeather = !showWeather;
+        document.getElementById('togWeather').classList.toggle('active', showWeather);
+      } else if (type === 'battery') {
+        showBattery = !showBattery;
+        document.getElementById('togBattery').classList.toggle('active', showBattery);
+      } else if (type === 'calendar') {
+        showCalendar = !showCalendar;
+        document.getElementById('togCalendar').classList.toggle('active', showCalendar);
+      }
+      renderPreview();
+    }
+
+    // ==========================================
+    // DIRECT CANVAS GESTURES, PINCH-TO-ZOOM & HIT-TESTING
+    // ==========================================
+    function scaleActiveLayer(factor) {
+      if (activeLayer === 1) {
+        bgScale = Math.max(0.6, Math.min(3.0, bgScale * factor));
+      } else if (activeLayer === 2) {
+        setClockSize(clockSize * factor);
+      } else if (activeLayer === 3) {
+        fgScale = Math.max(0.4, Math.min(3.0, fgScale * factor));
+      }
+      showBoundingBox = true;
+      renderPreview();
+    }
+
+    function resetActiveLayer() {
+      if (activeLayer === 1) {
+        bgScale = 1.0;
+        bgOffset = { x: 0, y: 0 };
+      } else if (activeLayer === 2) {
+        resetClockTransform();
+      } else if (activeLayer === 3) {
+        fgScale = 1.0;
+        fgOffset = { x: 0, y: 0 };
+      }
+      setHud('Posisi direset');
+      renderPreview();
+    }
+
+    function getCanvasPointer(e) {
+      const rect = previewCanvas.getBoundingClientRect();
+      const clientX = e.clientX !== undefined ? e.clientX : (e.touches && e.touches[0].clientX);
+      const clientY = e.clientY !== undefined ? e.clientY : (e.touches && e.touches[0].clientY);
+      return {
+        x: (clientX - rect.left) * (previewCanvas.width / rect.width),
+        y: (clientY - rect.top) * (previewCanvas.height / rect.height)
+      };
+    }
+
+    previewCanvas.addEventListener('mousedown', onPointerDown);
+    previewCanvas.addEventListener('mousemove', onPointerMove);
+    window.addEventListener('mouseup', onPointerUp);
+
+    previewCanvas.addEventListener('touchstart', onTouchStart, { passive: false });
+    previewCanvas.addEventListener('touchmove', onTouchMove, { passive: false });
+    window.addEventListener('touchend', onPointerUp);
+
+    function onPointerDown(e) {
+      e.preventDefault();
+      const pos = getCanvasPointer(e);
+      initDrag(pos.x, pos.y);
+    }
+
+    function onTouchStart(e) {
+      e.preventDefault();
+      if (e.touches.length === 2) {
+        // 2-finger Pinch Scale (Pinch to Zoom in / Zoom out)
+        const p1 = e.touches[0];
+        const p2 = e.touches[1];
+        initialPinchDist = Math.hypot(p1.clientX - p2.clientX, p1.clientY - p2.clientY);
+
+        const midX = (p1.clientX + p2.clientX) / 2;
+        const midY = (p1.clientY + p2.clientY) / 2;
+        const canvasPos = getCanvasPointer({ clientX: midX, clientY: midY });
+        const clockPixelX = previewCanvas.width * clockPos.x;
+        const clockPixelY = previewCanvas.height * clockPos.y;
+
+        // If pinching anywhere near the clock, automatically target Clock Layer
+        if (Math.hypot(canvasPos.x - clockPixelX, canvasPos.y - clockPixelY) < 140) {
+          selectLayer(2);
+        }
+
+        isResizing = true;
+        isDragging = false;
+        showBoundingBox = true;
+        setHud(activeLayer === 2 ? 'Pinch Jam: Cubit untuk zoom in/out' : 'Pinch Layer: Zoom aktif');
+        return;
+      }
+      const pos = getCanvasPointer(e);
+      initDrag(pos.x, pos.y);
+    }
+
+    function initDrag(x, y) {
+      isDragging = true;
+      dragStartPos = { x, y };
+      showBoundingBox = true;
+
+      // Smart Hit-Testing: check if user touched directly on the Clock
+      const clockPixelX = previewCanvas.width * clockPos.x;
+      const clockPixelY = previewCanvas.height * clockPos.y;
+      const clockDist = Math.hypot(x - clockPixelX, y - clockPixelY);
+
+      if (clockDist < 95 && activeLayer !== 2) {
+        selectLayer(2);
+      }
+
+      setHud(`Menggeser Layer ${activeLayer}...`);
+    }
+
+    function onPointerMove(e) {
+      if (!isDragging) return;
+      e.preventDefault();
+      const pos = getCanvasPointer(e);
+      handleDragMove(pos.x, pos.y);
+    }
+
+    function onTouchMove(e) {
+      e.preventDefault();
+      if (isResizing && e.touches.length === 2) {
+        const p1 = e.touches[0];
+        const p2 = e.touches[1];
+        const currentDist = Math.hypot(p1.clientX - p2.clientX, p1.clientY - p2.clientY);
+        const distDelta = currentDist - initialPinchDist;
+
+        if (Math.abs(distDelta) > 2.5) {
+          if (activeLayer === 2) {
+            // Smooth Pinch to Zoom Clock
+            const step = (distDelta > 0 ? 1 : -1) * Math.max(1, Math.abs(distDelta) * 0.35);
+            setClockSize(clockSize + step);
+          } else {
+            scaleActiveLayer(distDelta > 0 ? 1.03 : 0.97);
+          }
+          initialPinchDist = currentDist;
+        }
+        return;
+      }
+
+      if (!isDragging) return;
+      const pos = getCanvasPointer(e);
+      handleDragMove(pos.x, pos.y);
+    }
+
+    function handleDragMove(x, y) {
+      const dx = x - dragStartPos.x;
+      const dy = y - dragStartPos.y;
+      dragStartPos = { x, y };
+
+      if (activeLayer === 1) {
+        // Move Layer 1 Background
+        bgOffset.x += dx;
+        bgOffset.y += dy;
+      } else if (activeLayer === 2) {
+        // Move Layer 2 Clock (Free Transform)
+        clockPos.x = Math.max(0.15, Math.min(0.85, clockPos.x + (dx / previewCanvas.width)));
+        clockPos.y = Math.max(0.08, Math.min(0.68, clockPos.y + (dy / previewCanvas.height)));
+
+        // Sync Sliders if present
+        const xSlider = document.getElementById('clockPosXRange');
+        if (xSlider) xSlider.value = Math.round(clockPos.x * 100);
+        const ySlider = document.getElementById('clockPosYRange');
+        if (ySlider) ySlider.value = Math.round(clockPos.y * 100);
+      } else if (activeLayer === 3) {
+        // Move Layer 3 Foreground PNG
+        fgOffset.x += dx;
+        fgOffset.y += dy;
+      }
+
+      renderPreview();
+    }
+
+    function onPointerUp() {
+      isDragging = false;
+      isResizing = false;
+      renderPreview();
+      setTimeout(() => {
+        if (!isDragging && !isResizing) {
+          showBoundingBox = false;
+          renderPreview();
+        }
+      }, 1800);
+    }
+
+    // ==========================================
+    // RENDERING 3-LAYER COMPOSITING ENGINE
+    // ==========================================
+    function renderPreview() {
+      const pw = previewCanvas.width;
+      const ph = previewCanvas.height;
+      pCtx.clearRect(0, 0, pw, ph);
+
+      // ----------------------------------------------------
+      // LAYER 1: Background Image (Aspect Fill + Pan + Scale)
+      // ----------------------------------------------------
+      pCtx.save();
+      const bW = baseCanvas.width || pw;
+      const bH = baseCanvas.height || ph;
+      const bgAspect = bW / bH;
+      const pAspect = pw / ph;
+
+      let drawBgW, drawBgH;
+      if (bgAspect > pAspect) {
+        drawBgH = ph * bgScale;
+        drawBgW = drawBgH * bgAspect;
+      } else {
+        drawBgW = pw * bgScale;
+        drawBgH = drawBgW / bgAspect;
+      }
+
+      const drawBgX = ((pw - drawBgW) / 2) + bgOffset.x;
+      const drawBgY = ((ph - drawBgH) / 2) + bgOffset.y;
+
+      pCtx.drawImage(baseCanvas, drawBgX, drawBgY, drawBgW, drawBgH);
+
+      // Contrast Vignette
+      const vignette = pCtx.createLinearGradient(0, 0, 0, ph);
+      vignette.addColorStop(0, 'rgba(0, 0, 0, 0.22)');
+      vignette.addColorStop(0.3, 'rgba(0, 0, 0, 0.05)');
+      vignette.addColorStop(0.7, 'rgba(0, 0, 0, 0.16)');
+      vignette.addColorStop(1, 'rgba(0, 0, 0, 0.48)');
+      pCtx.fillStyle = vignette;
+      pCtx.fillRect(0, 0, pw, ph);
+      pCtx.restore();
+
+      // Active Box Indicator for Layer 1
+      if (showBoundingBox && activeLayer === 1) {
+        drawSelectionBox(drawBgX, drawBgY, drawBgW, drawBgH, '🌄 Layer 1: Background');
+      }
+
+      // ----------------------------------------------------
+      // LAYER 2: Giant iOS Lock Screen Clock (Behind Subject)
+      // ----------------------------------------------------
+      pCtx.save();
+      const clockX = pw * clockPos.x;
+      const clockY = ph * clockPos.y;
+
+      pCtx.textAlign = 'center';
+      pCtx.textBaseline = 'middle';
+      pCtx.fillStyle = clockColor;
+      pCtx.globalAlpha = clockOpacity;
+      pCtx.shadowColor = 'rgba(0, 0, 0, 0.65)';
+      pCtx.shadowBlur = 18;
+      pCtx.shadowOffsetY = 4;
+
+      // Date above clock
+      pCtx.font = `500 ${Math.floor(clockSize * 0.17)}px Cormorant Garamond, serif`;
+      const dateYOffset = (clockFormat === 'stacked') ? (clockSize * 0.82) : (clockSize * 0.54);
+      pCtx.fillText('Monday, 28 April', clockX, clockY - dateYOffset);
+
+      // Numerals
+      pCtx.font = `${clockWeight} ${clockSize}px ${clockFont}`;
+      let clockBoxW = clockSize * 1.6;
+      let clockBoxH = clockSize * 1.2;
+
+      if (clockFormat === 'stacked') {
+        const lineHeight = clockSize * 0.78;
+        pCtx.fillText('09', clockX, clockY - (lineHeight / 2) + 8);
+        pCtx.fillText('41', clockX, clockY + (lineHeight / 2) + 8);
+        clockBoxW = clockSize * 1.3;
+        clockBoxH = clockSize * 1.8;
+      } else {
+        pCtx.fillText('09:41', clockX, clockY);
+        clockBoxW = clockSize * 2.2;
+        clockBoxH = clockSize * 1.1;
+      }
+
+      // Lock Screen Widgets Preview
+      if (showWeather || showBattery || showCalendar) {
+        const widgetY = (clockFormat === 'stacked') ? clockY + (clockSize * 1.05) : clockY + (clockSize * 0.62);
+        pCtx.font = `600 12px -apple-system, sans-serif`;
+        let widgetItems = [];
+        if (showWeather) widgetItems.push('☀️ 30° Jakarta');
+        if (showBattery) widgetItems.push('🔋 100%');
+        if (showCalendar) widgetItems.push('📅 No Events');
+        pCtx.fillText(widgetItems.join('   •   '), clockX, widgetY);
+      }
+      pCtx.restore();
+
+      // Active Box Indicator for Layer 2 Clock
+      if (showBoundingBox && activeLayer === 2) {
+        drawSelectionBox(clockX - (clockBoxW / 2), clockY - (clockBoxH / 2) - 10, clockBoxW, clockBoxH + 20, '🕒 Layer 2: Jam 3D');
+      }
+
+      // ----------------------------------------------------
+      // LAYER 3: Foreground Transparent Subject (Over Clock!)
+      // ----------------------------------------------------
+      if (hasFg) {
+        pCtx.save();
+        const fW = fgCanvas.width || pw;
+        const fH = fgCanvas.height || ph;
+        const fgAspect = fW / fH;
+
+        let drawFgW, drawFgH;
+        if (fgAspect > pAspect) {
+          drawFgH = ph * fgScale;
+          drawFgW = drawFgH * fgAspect;
+        } else {
+          drawFgW = pw * fgScale;
+          drawFgH = drawFgW / fgAspect;
+        }
+
+        const drawFgX = ((pw - drawFgW) / 2) + fgOffset.x;
+        const drawFgY = ((ph - drawFgH) / 2) + fgOffset.y;
+
+        if (fgFlipped) {
+          pCtx.translate(drawFgX + drawFgW, drawFgY);
+          pCtx.scale(-1, 1);
+          pCtx.drawImage(fgCanvas, 0, 0, drawFgW, drawFgH);
+        } else {
+          pCtx.drawImage(fgCanvas, drawFgX, drawFgY, drawFgW, drawFgH);
+        }
+        pCtx.restore();
+
+        // Active Box Indicator for Layer 3 Foreground
+        if (showBoundingBox && activeLayer === 3) {
+          drawSelectionBox(drawFgX, drawFgY, drawFgW, drawFgH, '✂️ Layer 3: Foreground');
+        }
+      }
+
+      // ----------------------------------------------------
+      // LAYER 4: iOS Lock Screen Chrome & Bottom Affordances
+      // ----------------------------------------------------
+      pCtx.save();
+      // Status bar time
+      pCtx.fillStyle = '#FFF';
+      pCtx.font = '600 13px system-ui, -apple-system, sans-serif';
+      pCtx.textAlign = 'left';
+      pCtx.fillText('9:41', 26, 36);
+
+      // Lock icon
+      pCtx.textAlign = 'center';
+      pCtx.font = '14px system-ui, sans-serif';
+      pCtx.fillText('🔒', pw / 2, 58);
+
+      // Flashlight & Camera Buttons
+      const btnY = ph - 52;
+      pCtx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+      pCtx.beginPath();
+      pCtx.arc(44, btnY, 20, 0, Math.PI * 2);
+      pCtx.fill();
+      pCtx.fillStyle = '#FFF';
+      pCtx.font = '16px system-ui';
+      pCtx.fillText('🔦', 44, btnY + 5);
+
+      pCtx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+      pCtx.beginPath();
+      pCtx.arc(pw - 44, btnY, 20, 0, Math.PI * 2);
+      pCtx.fill();
+      pCtx.fillStyle = '#FFF';
+      pCtx.fillText('📷', pw - 44, btnY + 5);
+
+      // Home Bar Indicator
+      pCtx.fillStyle = 'rgba(255, 255, 255, 0.88)';
+      pCtx.beginPath();
+      pCtx.rect((pw - 110) / 2, ph - 14, 110, 4);
+      pCtx.fill();
+      pCtx.restore();
+    }
+
+    function drawSelectionBox(x, y, w, h, label) {
+      pCtx.save();
+      pCtx.strokeStyle = '#007AFF';
+      pCtx.lineWidth = 1.5;
+      pCtx.setLineDash([4, 4]);
+      pCtx.strokeRect(x, y, w, h);
+
+      // Corner handles
+      pCtx.fillStyle = '#007AFF';
+      pCtx.setLineDash([]);
+      const dotSize = 6;
+      pCtx.fillRect(x - dotSize / 2, y - dotSize / 2, dotSize, dotSize);
+      pCtx.fillRect(x + w - dotSize / 2, y - dotSize / 2, dotSize, dotSize);
+      pCtx.fillRect(x - dotSize / 2, y + h - dotSize / 2, dotSize, dotSize);
+      pCtx.fillRect(x + w - dotSize / 2, y + h - dotSize / 2, dotSize, dotSize);
+
+      // Tag Label
+      pCtx.fillStyle = 'rgba(0, 122, 255, 0.9)';
+      pCtx.font = '600 10px system-ui';
+      pCtx.textAlign = 'left';
+      pCtx.textBaseline = 'top';
+      const tw = pCtx.measureText(label).width;
+      pCtx.fillRect(x, Math.max(4, y - 18), tw + 8, 16);
+      pCtx.fillStyle = '#FFF';
+      pCtx.fillText(label, x + 4, Math.max(4, y - 16));
+      pCtx.restore();
+    }
+
+    // ==========================================
+    // EXPORT & REAL SYNCHRONIZATION WITH LOCKSCREEN
+    // ==========================================
+    function exportWallpaper(mode) {
+      setHud('Sedang memproses wallpaper...');
+
+      const targetW = 720;
+      const targetH = 1560;
+
+      // 1. Export Canvas for Background Photo
+      const expCanvas = document.createElement('canvas');
+      expCanvas.width = targetW;
+      expCanvas.height = targetH;
+      const eCtx = expCanvas.getContext('2d');
+
+      const bW = baseCanvas.width || targetW;
+      const bH = baseCanvas.height || targetH;
+      const bgAspect = bW / bH;
+      const targetAspect = targetW / targetH;
+
+      let drawBgW, drawBgH;
+      if (bgAspect > targetAspect) {
+        drawBgH = targetH * bgScale;
+        drawBgW = drawBgH * bgAspect;
+      } else {
+        drawBgW = targetW * bgScale;
+        drawBgH = drawBgW / bgAspect;
+      }
+
+      const scaleRatio = targetW / previewCanvas.width;
+      const drawBgX = ((targetW - drawBgW) / 2) + (bgOffset.x * scaleRatio);
+      const drawBgY = ((targetH - drawBgH) / 2) + (bgOffset.y * scaleRatio);
+
+      // 2. Export Canvas for Foreground PNG Cutout
+      const fgExpCanvas = document.createElement('canvas');
+      fgExpCanvas.width = targetW;
+      fgExpCanvas.height = targetH;
+      const fgECtx = fgExpCanvas.getContext('2d');
+
+      if (hasFg) {
+        const fW = fgCanvas.width || targetW;
+        const fH = fgCanvas.height || targetH;
+        const fgAspect = fW / fH;
+
+        let drawFgW, drawFgH;
+        if (fgAspect > targetAspect) {
+          drawFgH = targetH * fgScale;
+          drawFgW = drawFgH * fgAspect;
+        } else {
+          drawFgW = targetW * fgScale;
+          drawFgH = drawFgW / fgAspect;
+        }
+
+        const drawFgX = ((targetW - drawFgW) / 2) + (fgOffset.x * scaleRatio);
+        const drawFgY = ((targetH - drawFgH) / 2) + (fgOffset.y * scaleRatio);
+
+        if (fgFlipped) {
+          fgECtx.translate(drawFgX + drawFgW, drawFgY);
+          fgECtx.scale(-1, 1);
+          fgECtx.drawImage(fgCanvas, 0, 0, drawFgW, drawFgH);
+        } else {
+          fgECtx.drawImage(fgCanvas, drawFgX, drawFgY, drawFgW, drawFgH);
+        }
+      }
+
+      // Draw background to export
+      if (mode === 'foreground_only') {
+        // Cutout PNG only
+        const fgDataUrl = fgExpCanvas.toDataURL('image/png');
+        const outName = `DepthSubject_${Date.now()}.png`;
+        if (window.AndroidBridge && window.AndroidBridge.saveImageToGallery) {
+          window.AndroidBridge.saveImageToGallery(fgDataUrl, outName);
+        }
+        setHud('✅ Cutout PNG berhasil disimpan!');
+        return;
+      }
+
+      eCtx.drawImage(baseCanvas, drawBgX, drawBgY, drawBgW, drawBgH);
+
+      if (mode === 'with_clock') {
+        // Composite Clock + Foreground directly onto image
+        eCtx.save();
+        const clockX = targetW * clockPos.x;
+        const clockY = targetH * clockPos.y;
+        const highResClockSize = clockSize * scaleRatio;
+
+        eCtx.textAlign = 'center';
+        eCtx.textBaseline = 'middle';
+        eCtx.fillStyle = clockColor;
+        eCtx.globalAlpha = clockOpacity;
+        eCtx.shadowColor = 'rgba(0, 0, 0, 0.65)';
+        eCtx.shadowBlur = 18 * scaleRatio;
+        eCtx.shadowOffsetY = 4 * scaleRatio;
+
+        // Date
+        eCtx.font = `500 ${Math.floor(highResClockSize * 0.17)}px Cormorant Garamond, serif`;
+        const dateYOffset = (clockFormat === 'stacked') ? (highResClockSize * 0.82) : (highResClockSize * 0.54);
+        eCtx.fillText('Monday, 28 April', clockX, clockY - dateYOffset);
+
+        // Numerals
+        eCtx.font = `${clockWeight} ${highResClockSize}px ${clockFont}`;
+        if (clockFormat === 'stacked') {
+          const lineHeight = highResClockSize * 0.78;
+          eCtx.fillText('09', clockX, clockY - (lineHeight / 2) + (8 * scaleRatio));
+          eCtx.fillText('41', clockX, clockY + (lineHeight / 2) + (8 * scaleRatio));
+        } else {
+          eCtx.fillText('09:41', clockX, clockY);
+        }
+        eCtx.restore();
+
+        // Draw foreground over clock
+        if (hasFg) {
+          eCtx.drawImage(fgExpCanvas, 0, 0);
+        }
+
+        const fullDataUrl = expCanvas.toDataURL('image/jpeg', 0.92);
+        const outName = `DepthWallpaper_Full_${Date.now()}.jpg`;
+        if (window.AndroidBridge && window.AndroidBridge.saveImageToGallery) {
+          window.AndroidBridge.saveImageToGallery(fullDataUrl, outName);
+        }
+        setHud('✅ Wallpaper + Jam disimpan ke Galeri!');
+        return;
+      }
+
+      // Mode: set_wallpaper_now (3-Layer Depth Effect into Android Lock Screen)
+      const bgDataUrl = expCanvas.toDataURL('image/jpeg', 0.92);
+      const fgDataUrl = hasFg ? fgExpCanvas.toDataURL('image/png') : null;
+      const outName = `DepthWallpaper_${Date.now()}.jpg`;
+
+      const clockConfig = {
+        format: clockFormat,
+        font: clockFontName,
+        color: clockColor,
+        size: clockSize,
+        weight: clockWeight,
+        opacity: clockOpacity,
+        posX: clockPos.x,
+        posY: clockPos.y,
+        showWeather: showWeather,
+        showBattery: showBattery,
+        showCalendar: showCalendar
+      };
+
+      if (window.AndroidBridge && window.AndroidBridge.saveAndSetDepthWallpaper) {
+        window.AndroidBridge.saveAndSetDepthWallpaper(bgDataUrl, outName, fgDataUrl, JSON.stringify(clockConfig));
+        setHud('✅ Berhasil dipasang ke Lock Screen & Settings!');
+      } else if (window.AndroidBridge && window.AndroidBridge.saveAndSetWallpaper) {
+        window.AndroidBridge.saveAndSetWallpaper(bgDataUrl, outName);
+        setHud('✅ Wallpaper dipasang ke Lock Screen!');
+      } else {
+        setHud('✅ Mode preview web');
+      }
+    }
+
+    // ==========================================
+    // INITIALIZATION
+    // ==========================================
+    window.addEventListener('DOMContentLoaded', () => {
+      initDefaultLandscape();
+      selectLayer(2); // Start on Clock (Layer 2)
+    });
+  </script>
+</body>
+</html>

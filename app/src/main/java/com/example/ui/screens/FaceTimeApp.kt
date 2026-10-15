@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -64,6 +65,10 @@ fun FaceTimeApp(
         )
     }
 
+    BackHandler(enabled = isInVideoCall) {
+        isInVideoCall = false
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -71,20 +76,8 @@ fun FaceTimeApp(
             .navigationBarsPadding()
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            IOSStatusBar(
-                dynamicIslandData = dynamicIslandData,
-                onDismissDynamicIsland = { viewModel.dismissDynamicIsland() },
-                onOpenControlCenter = { viewModel.toggleControlCenter() },
-                onOpenNotificationCenter = { viewModel.toggleNotificationCenter() },
-                currentTime = currentTime,
-                batteryLevel = batteryLevel,
-                isBatteryCharging = isBatteryCharging,
-                isWifiConnected = isWifiConnected,
-                wifiSignalLevel = wifiSignalLevel,
-                cellularBars = cellularBars,
-                networkType = networkType,
-                isDarkIcons = false
-            )
+            // Spacer for Single Global Status Bar
+            Spacer(modifier = Modifier.height(44.dp))
 
             if (isInVideoCall) {
                 // Active FaceTime Video Call Screen

@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.asStateFlow
 object OverlayBridge {
     // Dynamic Island State (Synchronized with Launcher Home & ViewModel)
     val dynamicIslandData = MutableStateFlow(DynamicIslandData(mode = DynamicIslandMode.COMPACT))
+    val secondaryIslandData = MutableStateFlow<DynamicIslandData?>(null)
 
     // Music State
     val isMusicPlaying = MutableStateFlow(false)
@@ -37,12 +38,37 @@ object OverlayBridge {
     val isStatusBarDarkIcons = MutableStateFlow(false)
     val currentFocusMode = MutableStateFlow(com.example.model.FocusMode.OFF)
 
+    // Powerful Status Bar Telemetry
+    val isBluetoothConnected = MutableStateFlow(false)
+    val isVpnConnected = MutableStateFlow(false)
+    val isLocationActive = MutableStateFlow(false)
+    val isAlarmSet = MutableStateFlow(false)
+    val isLowPowerMode = MutableStateFlow(false)
+    val showBatteryPercentage = MutableStateFlow(true)
+    val networkSpeed = MutableStateFlow("0 KB/s")
+    val showNetworkSpeed = MutableStateFlow(true)
+    val notchOffsetY = MutableStateFlow(0f)
+    val notchScale = MutableStateFlow(1.0f)
+    val carrierName = MutableStateFlow("Telkomsel")
+    val isCallMuted = MutableStateFlow(false)
+    val isCallSpeaker = MutableStateFlow(false)
+    val currentWallpaperRes = MutableStateFlow(com.example.R.drawable.wallpaper_alpine)
+    val currentWallpaperUri = MutableStateFlow<String?>(null)
+
     // Actions
     var onTogglePlayPause: (() -> Unit)? = null
     var onNextSong: (() -> Unit)? = null
     var onPrevSong: (() -> Unit)? = null
+    var onSeekMusic: ((Float) -> Unit)? = null
     var onEndCall: (() -> Unit)? = null
+    var onAnswerCall: (() -> Unit)? = null
+    var onDeclineCall: (() -> Unit)? = null
     var onToggleMute: (() -> Unit)? = null
     var onToggleSpeaker: (() -> Unit)? = null
+    var onTimerPauseResume: (() -> Unit)? = null
+    var onTimerCancel: (() -> Unit)? = null
+    var onVoiceMemoStop: (() -> Unit)? = null
     var onDismissDynamicIsland: (() -> Unit)? = null
+    var onSecondaryIslandClick: (() -> Unit)? = null
+    var onDoubleTapStatusBar: (() -> Unit)? = null
 }

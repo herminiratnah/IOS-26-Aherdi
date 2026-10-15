@@ -44,7 +44,10 @@ fun SettingsApp(
 
     val airplaneMode by viewModel.airplaneMode.collectAsState()
     val wifiEnabled by viewModel.wifiEnabled.collectAsState()
+    val currentWifiSsid by viewModel.currentWifiSsid.collectAsState()
     val bluetoothEnabled by viewModel.bluetoothEnabled.collectAsState()
+    val cellularEnabled by viewModel.cellularEnabled.collectAsState()
+    val cellularCarrierName by viewModel.cellularCarrierName.collectAsState()
     val currentWallpaperName by viewModel.currentWallpaperName.collectAsState()
     val actionButtonFunction by viewModel.actionButtonFunction.collectAsState()
     val cameraControlEnabled by viewModel.cameraControlEnabled.collectAsState()
@@ -59,7 +62,15 @@ fun SettingsApp(
 
     BackHandler {
         if (currentSubPage != SettingsSubPage.MAIN) {
-            currentSubPage = SettingsSubPage.MAIN
+            when (currentSubPage) {
+                SettingsSubPage.ABOUT, SettingsSubPage.SOFTWARE_UPDATE, SettingsSubPage.STORAGE,
+                SettingsSubPage.DATE_TIME, SettingsSubPage.LANGUAGE, SettingsSubPage.VPN, SettingsSubPage.RESET -> {
+                    currentSubPage = SettingsSubPage.GENERAL
+                }
+                SettingsSubPage.BACK_TAP -> currentSubPage = SettingsSubPage.ACCESSIBILITY
+                SettingsSubPage.BATTERY_HEALTH -> currentSubPage = SettingsSubPage.BATTERY
+                else -> currentSubPage = SettingsSubPage.MAIN
+            }
         } else {
             viewModel.closeApp()
         }
@@ -72,21 +83,8 @@ fun SettingsApp(
             .navigationBarsPadding()
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            IOSStatusBar(
-                dynamicIslandData = dynamicIslandData,
-                onDismissDynamicIsland = { viewModel.dismissDynamicIsland() },
-                onOpenControlCenter = { viewModel.toggleControlCenter() },
-                onOpenNotificationCenter = { viewModel.toggleNotificationCenter() },
-                currentTime = currentTime,
-                batteryLevel = batteryLevel,
-                isBatteryCharging = isBatteryCharging,
-                isWifiConnected = isWifiConnected,
-                wifiSignalLevel = wifiSignalLevel,
-                cellularBars = cellularBars,
-                networkType = networkType,
-                isAirplaneMode = airplaneMode,
-                isDarkIcons = true
-            )
+            // Spacer for Single Global Status Bar
+            Spacer(modifier = Modifier.height(44.dp))
 
             Box(
                 modifier = Modifier
@@ -200,7 +198,7 @@ fun SettingsApp(
                                     icon = Icons.Rounded.Wifi,
                                     iconBg = Color(0xFF007AFF),
                                     title = "Wi-Fi",
-                                    detail = if (wifiEnabled) (if (isWifiConnected) "Home_Fast_WiFi" else "Not Connected") else "Off",
+                                    detail = if (wifiEnabled) (if (isWifiConnected && currentWifiSsid.isNotBlank() && currentWifiSsid != "Not Connected") currentWifiSsid else if (isWifiConnected) "Connected" else "Not Connected") else "Off",
                                     onClick = { currentSubPage = SettingsSubPage.WIFI }
                                 )
                                 HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
@@ -216,7 +214,7 @@ fun SettingsApp(
                                     icon = Icons.Rounded.SignalCellularAlt,
                                     iconBg = Color(0xFF34C759),
                                     title = "Cellular",
-                                    detail = "5G Auto",
+                                    detail = if (cellularEnabled) (if (cellularCarrierName.isNotBlank()) cellularCarrierName else "Cellular Data") else "Off",
                                     onClick = { currentSubPage = SettingsSubPage.CELLULAR }
                                 )
                                 HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
@@ -301,6 +299,14 @@ fun SettingsApp(
                                     title = "Control Center",
                                     detail = "",
                                     onClick = { viewModel.toggleControlCenter() }
+                                )
+                                HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
+                                IOSSettingsRow(
+                                    icon = Icons.Rounded.CenterFocusStrong,
+                                    iconBg = Color.Black,
+                                    title = "Dynamic Island",
+                                    detail = "Semua Fitur",
+                                    onClick = { currentSubPage = SettingsSubPage.DYNAMIC_ISLAND }
                                 )
                                 HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
                                 IOSSettingsRow(
@@ -517,6 +523,7 @@ fun SettingsApp(
                     SettingsSubPage.RESET -> ResetSubPage(viewModel = viewModel, onBack = { currentSubPage = SettingsSubPage.GENERAL })
                     SettingsSubPage.DEVELOPER -> DeveloperSubPage(viewModel = viewModel, onBack = { currentSubPage = SettingsSubPage.MAIN })
                     SettingsSubPage.BATTERY_HEALTH -> BatteryHealthSubPage(viewModel = viewModel, onBack = { currentSubPage = SettingsSubPage.BATTERY })
+                    SettingsSubPage.DYNAMIC_ISLAND -> DynamicIslandSubPage(viewModel = viewModel, onBack = { currentSubPage = SettingsSubPage.MAIN })
                     SettingsSubPage.APP_SETTINGS -> {
                         AppSettingsSubPage(
                             appName = genericPageTitle.ifEmpty { "Settings" },

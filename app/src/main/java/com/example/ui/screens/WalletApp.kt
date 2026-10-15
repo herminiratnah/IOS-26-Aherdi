@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -90,6 +91,11 @@ fun WalletApp(
         TransactionItem("Whole Foods", "Groceries", "-$54.30", "12 Jul")
     )
 
+    BackHandler(enabled = isNfcActive || showAddCardDialog) {
+        if (isNfcActive) isNfcActive = false
+        else showAddCardDialog = false
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -97,20 +103,8 @@ fun WalletApp(
             .navigationBarsPadding()
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            IOSStatusBar(
-                dynamicIslandData = dynamicIslandData,
-                onDismissDynamicIsland = { viewModel.dismissDynamicIsland() },
-                onOpenControlCenter = { viewModel.toggleControlCenter() },
-                onOpenNotificationCenter = { viewModel.toggleNotificationCenter() },
-                currentTime = currentTime,
-                batteryLevel = batteryLevel,
-                isBatteryCharging = isBatteryCharging,
-                isWifiConnected = isWifiConnected,
-                wifiSignalLevel = wifiSignalLevel,
-                cellularBars = cellularBars,
-                networkType = networkType,
-                isDarkIcons = false
-            )
+            // Spacer for Single Global Status Bar
+            Spacer(modifier = Modifier.height(44.dp))
 
             // Header
             Row(

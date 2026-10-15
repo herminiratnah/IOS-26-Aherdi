@@ -1,5 +1,6 @@
 package com.example.model
 
+import android.graphics.Bitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 
@@ -27,14 +28,20 @@ enum class AppId {
     WEATHER,
     STOCKS,
     BOOKS,
-    ROOT_TOOLS
+    ROOT_TOOLS,
+    DYNAMIC_ISLAND,
+    DEPTH_STUDIO,
+    CUSTOM_APP
 }
 
 data class AppItem(
-    val id: AppId,
+    val id: AppId = AppId.CUSTOM_APP,
     val name: String,
-    val iconBgColor: Color,
+    val iconBgColor: Color = Color(0xFF007AFF),
     val iconVector: ImageVector? = null,
     val badgeCount: Int = 0,
-    val isDock: Boolean = false
+    val isDock: Boolean = false,
+    val packageName: String? = null,
+    val isInstalledApp: Boolean = false,
+    val customBitmap: Bitmap? = null
 )

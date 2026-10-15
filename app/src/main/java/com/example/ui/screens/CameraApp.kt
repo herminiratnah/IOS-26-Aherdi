@@ -10,16 +10,21 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraControl
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.*
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,10 +35,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import java.util.concurrent.TimeUnit
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -116,6 +126,17 @@ fun CameraApp(
     var isCameraBound by remember { mutableStateOf(false) }
     var previewPhotoModal by remember { mutableStateOf<PhotoItem?>(null) }
     var previewViewInstance by remember { mutableStateOf<PreviewView?>(null) }
+    var focusPoint by remember { mutableStateOf<Offset?>(null) }
+    var isFocusing by remember { mutableStateOf(false) }
+
+    LaunchedEffect(focusPoint) {
+        if (focusPoint != null) {
+            isFocusing = true
+            delay(2500)
+            isFocusing = false
+            focusPoint = null
+        }
+    }
 
     DisposableEffect(lifecycleOwner) {
         onDispose {
@@ -216,14 +237,8 @@ fun CameraApp(
                 .fillMaxSize()
                 .padding(top = 4.dp)
         ) {
-            // Status bar
-            IOSStatusBar(
-                dynamicIslandData = dynamicIslandData,
-                onDismissDynamicIsland = { viewModel.dismissDynamicIsland() },
-                onOpenControlCenter = { viewModel.toggleControlCenter() },
-                onOpenNotificationCenter = { viewModel.toggleNotificationCenter() },
-                isDarkIcons = false
-            )
+            // Spacer for Single Global Status Bar
+            Spacer(modifier = Modifier.height(44.dp))
 
             // Top Camera Controls Bar matching authentic iOS Camera
             Row(
@@ -327,7 +342,26 @@ fun CameraApp(
                     .fillMaxWidth()
                     .padding(horizontal = 8.dp)
                     .clip(RoundedCornerShape(20.dp))
-                    .background(Color(0xFF151517)),
+                    .background(Color(0xFF151517))
+                    .pointerInput(hasCameraPermission, isCameraBound) {
+                        detectTapGestures { offset ->
+                            focusPoint = offset
+                            isFocusing = true
+                            IOSFeedbackHelper.vibrateLight(context)
+                            val pv = previewViewInstance
+                            val ctrl = cameraControl
+                            if (pv != null && ctrl != null && isCameraBound) {
+                                try {
+                                    val factory = pv.meteringPointFactory
+                                    val point = factory.createPoint(offset.x, offset.y)
+                                    val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE)
+                                        .setAutoCancelDuration(3, TimeUnit.SECONDS)
+                                        .build()
+                                    ctrl.startFocusAndMetering(action)
+                                } catch (ignored: Exception) {}
+                            }
+                        }
+                    },
                 contentAlignment = Alignment.Center
             ) {
                 if (hasCameraPermission) {
@@ -358,12 +392,14 @@ fun CameraApp(
                                 .fillMaxSize()
                                 .background(Color(0x22000000))
                         )
-                        Box(
-                            modifier = Modifier
-                                .size(64.dp)
-                                .align(Alignment.Center)
-                                .border(1.5.dp, IOSYellow, RoundedCornerShape(4.dp))
-                        )
+                        if (focusPoint == null) {
+                            Box(
+                                modifier = Modifier
+                                    .size(64.dp)
+                                    .align(Alignment.Center)
+                                    .border(1.5.dp, IOSYellow, RoundedCornerShape(4.dp))
+                            )
+                        }
                         if (!hasCameraPermission) {
                             Column(
                                 modifier = Modifier
@@ -452,6 +488,43 @@ fun CameraApp(
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 1.sp
+                        )
+                    }
+                }
+
+                // Authentic iOS Yellow Focus Box with Metering Sun
+                focusPoint?.let { pt ->
+                    val density = LocalDensity.current
+                    val focusScale by animateFloatAsState(
+                        targetValue = if (isFocusing) 1f else 1.25f,
+                        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+                        label = "focusScale"
+                    )
+                    Box(
+                        modifier = Modifier
+                            .offset(
+                                x = with(density) { pt.x.toDp() } - 36.dp,
+                                y = with(density) { pt.y.toDp() } - 36.dp
+                            )
+                            .size(72.dp)
+                            .graphicsLayer {
+                                scaleX = focusScale
+                                scaleY = focusScale
+                            }
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .border(1.5.dp, IOSYellow, RoundedCornerShape(4.dp))
+                        )
+                        Icon(
+                            imageVector = Icons.Rounded.LightMode,
+                            contentDescription = "Exposure Metering",
+                            tint = IOSYellow,
+                            modifier = Modifier
+                                .size(16.dp)
+                                .align(Alignment.CenterEnd)
+                                .offset(x = 18.dp)
                         )
                     }
                 }

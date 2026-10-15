@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -61,6 +62,10 @@ fun MapsApp(
         Pair("Groceries", Icons.Rounded.ShoppingCart),
         Pair("Parking", Icons.Rounded.LocalParking)
     )
+
+    BackHandler(enabled = isNavigating) {
+        isNavigating = false
+    }
 
     Box(
         modifier = modifier
@@ -209,21 +214,8 @@ fun MapsApp(
                 .fillMaxWidth()
                 .align(Alignment.TopCenter)
         ) {
-            IOSStatusBar(
-                dynamicIslandData = dynamicIslandData,
-                onDismissDynamicIsland = { viewModel.dismissDynamicIsland() },
-                onOpenControlCenter = { viewModel.toggleControlCenter() },
-                onOpenNotificationCenter = { viewModel.toggleNotificationCenter() },
-                currentTime = currentTime,
-                batteryLevel = batteryLevel,
-                isBatteryCharging = isBatteryCharging,
-                isWifiConnected = isWifiConnected,
-                wifiSignalLevel = wifiSignalLevel,
-                cellularBars = cellularBars,
-                networkType = networkType,
-                isAirplaneMode = airplaneMode,
-                isDarkIcons = true
-            )
+            // Spacer for Single Global Status Bar
+            Spacer(modifier = Modifier.height(44.dp))
 
             // Search Bar
             Box(

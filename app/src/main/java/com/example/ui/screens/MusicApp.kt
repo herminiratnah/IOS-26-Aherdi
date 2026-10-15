@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -66,6 +67,10 @@ fun MusicApp(
     var showFullPlayer by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
 
+    BackHandler(enabled = showFullPlayer) {
+        showFullPlayer = false
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -74,29 +79,8 @@ fun MusicApp(
             .navigationBarsPadding()
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Status bar
-            IOSStatusBar(
-                dynamicIslandData = dynamicIslandData,
-                onDismissDynamicIsland = { viewModel.dismissDynamicIsland() },
-                onOpenControlCenter = { viewModel.toggleControlCenter() },
-                onOpenNotificationCenter = { viewModel.toggleNotificationCenter() },
-                currentTime = currentTime,
-                batteryLevel = batteryLevel,
-                isBatteryCharging = isBatteryCharging,
-                isWifiConnected = isWifiConnected,
-                wifiSignalLevel = wifiSignalLevel,
-                cellularBars = cellularBars,
-                networkType = networkType,
-                isDarkIcons = true,
-                isMusicPlaying = isPlaying,
-                musicProgress = progress,
-                musicCurrentTimeStr = currentTimeStr,
-                musicDurationStr = durationStr,
-                onMusicPlayPause = { viewModel.toggleMusicPlay() },
-                onMusicNext = { viewModel.skipNextSong(context) },
-                onMusicPrev = { viewModel.skipPreviousSong(context) },
-                onExpandMusic = { viewModel.showMusicInDynamicIsland() }
-            )
+            // Spacer for Single Global Status Bar
+            Spacer(modifier = Modifier.height(44.dp))
 
             // Header
             Row(

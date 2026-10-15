@@ -5,11 +5,16 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.*
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -28,6 +33,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -95,6 +102,10 @@ fun PhotosApp(
     var searchQuery by remember { mutableStateOf("") }
     val selectedWidgetPhotoIds by viewModel.selectedWidgetPhotoIds.collectAsState()
 
+    BackHandler(enabled = selectedPhoto != null) {
+        selectedPhoto = null
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -105,14 +116,8 @@ fun PhotosApp(
                 .fillMaxSize()
                 .padding(top = 4.dp)
         ) {
-            // iOS Status bar (Dark Icons for white background)
-            IOSStatusBar(
-                dynamicIslandData = dynamicIslandData,
-                onDismissDynamicIsland = { viewModel.dismissDynamicIsland() },
-                onOpenControlCenter = { viewModel.toggleControlCenter() },
-                onOpenNotificationCenter = { viewModel.toggleNotificationCenter() },
-                isDarkIcons = true
-            )
+            // Spacer for Single Global Status Bar
+            Spacer(modifier = Modifier.height(44.dp))
 
             // Top Header Bar
             Row(
@@ -268,90 +273,249 @@ fun PhotosApp(
             )
         }
 
-        // Full Screen Photo Viewer Dialog
+        // Full Screen Photo Viewer Dialog with Zoom & Pan
         selectedPhoto?.let { photo ->
+            var scale by remember { mutableStateOf(1f) }
+            var offsetX by remember { mutableStateOf(0f) }
+            var offsetY by remember { mutableStateOf(0f) }
+            var showControls by remember { mutableStateOf(true) }
+
+            // Reset zoom whenever a new photo is selected
+            LaunchedEffect(photo.id) {
+                scale = 1f
+                offsetX = 0f
+                offsetY = 0f
+                showControls = true
+            }
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color.Black)
             ) {
-                // Photo Image
+                // Photo Image container with pinch-to-zoom, pan, double tap
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .clickable { selectedPhoto = null },
+                        .pointerInput(photo.id) {
+                            detectTapGestures(
+                                onDoubleTap = { tapOffset ->
+                                    if (scale > 1.05f) {
+                                        scale = 1f
+                                        offsetX = 0f
+                                        offsetY = 0f
+                                    } else {
+                                        scale = 2.5f
+                                        val centerX = size.width / 2f
+                                        val centerY = size.height / 2f
+                                        offsetX = (centerX - tapOffset.x) * 1.2f
+                                        offsetY = (centerY - tapOffset.y) * 1.2f
+                                    }
+                                },
+                                onTap = {
+                                    showControls = !showControls
+                                }
+                            )
+                        }
+                        .pointerInput(photo.id) {
+                            detectTransformGestures { _, pan, zoom, _ ->
+                                val newScale = (scale * zoom).coerceIn(1f, 5f)
+                                scale = newScale
+                                if (newScale > 1f) {
+                                    val maxOffsetX = (size.width * (newScale - 1f)) / 2f
+                                    val maxOffsetY = (size.height * (newScale - 1f)) / 2f
+                                    offsetX = (offsetX + pan.x).coerceIn(-maxOffsetX, maxOffsetX)
+                                    offsetY = (offsetY + pan.y).coerceIn(-maxOffsetY, maxOffsetY)
+                                } else {
+                                    offsetX = 0f
+                                    offsetY = 0f
+                                }
+                            }
+                        },
                     contentAlignment = Alignment.Center
                 ) {
-                    if (photo.imageUri != null) {
-                        AsyncImage(
-                            model = photo.imageUri,
-                            contentDescription = photo.title,
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else {
-                        Image(
-                            painter = painterResource(id = photo.drawableRes.takeIf { it != 0 } ?: R.drawable.photo_widget_nature),
-                            contentDescription = photo.title,
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier.fillMaxSize()
-                        )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                scaleX = scale
+                                scaleY = scale
+                                translationX = offsetX
+                                translationY = offsetY
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (photo.imageUri != null) {
+                            AsyncImage(
+                                model = photo.imageUri,
+                                contentDescription = photo.title,
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Image(
+                                painter = painterResource(id = photo.drawableRes.takeIf { it != 0 } ?: R.drawable.photo_widget_nature),
+                                contentDescription = photo.title,
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
                     }
                 }
 
-                // Top Bar
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 16.dp, start = 16.dp, end = 16.dp)
-                        .align(Alignment.TopCenter),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                // Top Bar with Fade In/Out
+                AnimatedVisibility(
+                    visible = showControls,
+                    enter = fadeIn(),
+                    exit = fadeOut(),
+                    modifier = Modifier.align(Alignment.TopCenter)
                 ) {
-                    IconButton(
-                        onClick = { selectedPhoto = null },
+                    Row(
                         modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(Color(0x66000000))
+                            .fillMaxWidth()
+                            .background(Color.Black.copy(alpha = 0.45f))
+                            .padding(top = 28.dp, bottom = 12.dp, start = 16.dp, end = 16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Rounded.Close, contentDescription = "Close", tint = Color.White)
-                    }
-
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(photo.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(photo.date, color = Color.LightGray, fontSize = 11.sp)
-                    }
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        val isInWidget = selectedWidgetPhotoIds.contains(photo.id)
                         IconButton(
-                            onClick = {
-                                viewModel.togglePhotoInWidgetSelection(photo.id)
-                            },
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(if (isInWidget) Color(0xFFFF9500) else Color(0x66000000))
-                        ) {
-                            Icon(
-                                imageVector = if (isInWidget) Icons.Rounded.Widgets else Icons.Rounded.AddPhotoAlternate,
-                                contentDescription = "Widget",
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-
-                        IconButton(
-                            onClick = {
-                                viewModel.openShareSheet(photo.title.ifBlank { "Photo" })
-                            },
+                            onClick = { selectedPhoto = null },
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(CircleShape)
                                 .background(Color(0x66000000))
                         ) {
-                            Icon(Icons.Rounded.Share, contentDescription = "Share", tint = Color.White)
+                            Icon(Icons.Rounded.Close, contentDescription = "Close", tint = Color.White)
+                        }
+
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(photo.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(photo.date, color = Color.LightGray, fontSize = 11.sp)
+                        }
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            val isInWidget = selectedWidgetPhotoIds.contains(photo.id)
+                            IconButton(
+                                onClick = {
+                                    viewModel.togglePhotoInWidgetSelection(photo.id)
+                                },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isInWidget) Color(0xFFFF9500) else Color(0x66000000))
+                            ) {
+                                Icon(
+                                    imageVector = if (isInWidget) Icons.Rounded.Widgets else Icons.Rounded.AddPhotoAlternate,
+                                    contentDescription = "Widget",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+
+                            IconButton(
+                                onClick = {
+                                    if (photo.imageUri != null) {
+                                        viewModel.setWallpaper(0, photo.title.ifBlank { "Photo" }, photo.imageUri, context)
+                                    } else {
+                                        viewModel.setWallpaper(photo.drawableRes, photo.title.ifBlank { "Photo" }, null, context)
+                                    }
+                                },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0x66000000))
+                            ) {
+                                Icon(Icons.Rounded.Wallpaper, contentDescription = "Set as Wallpaper", tint = Color.White)
+                            }
+
+                            IconButton(
+                                onClick = {
+                                    viewModel.openShareSheet(photo.title.ifBlank { "Photo" })
+                                },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0x66000000))
+                            ) {
+                                Icon(Icons.Rounded.Share, contentDescription = "Share", tint = Color.White)
+                            }
+                        }
+                    }
+                }
+
+                // Floating iOS Zoom Pill at Bottom
+                AnimatedVisibility(
+                    visible = showControls,
+                    enter = fadeIn(),
+                    exit = fadeOut(),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 36.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(24.dp))
+                            .background(Color(0x99000000))
+                            .border(0.5.dp, Color(0x33FFFFFF), RoundedCornerShape(24.dp))
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        IconButton(
+                            onClick = {
+                                val next = (scale - 0.5f).coerceIn(1f, 5f)
+                                scale = next
+                                if (next <= 1f) {
+                                    offsetX = 0f
+                                    offsetY = 0f
+                                }
+                            },
+                            enabled = scale > 1f,
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                Icons.Rounded.ZoomOut,
+                                contentDescription = "Zoom Out",
+                                tint = if (scale > 1f) Color.White else Color(0x55FFFFFF),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        // Tapable Zoom Factor Pill (tap to reset to 1.0x)
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (scale > 1.05f) Color(0xFF007AFF) else Color(0x44FFFFFF))
+                                .clickable {
+                                    scale = 1f
+                                    offsetX = 0f
+                                    offsetY = 0f
+                                }
+                                .padding(horizontal = 10.dp, vertical = 4.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = String.format(java.util.Locale.US, "%.1fx", scale),
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        IconButton(
+                            onClick = {
+                                val next = (scale + 0.5f).coerceIn(1f, 5f)
+                                scale = next
+                            },
+                            enabled = scale < 5f,
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                Icons.Rounded.ZoomIn,
+                                contentDescription = "Zoom In",
+                                tint = if (scale < 5f) Color.White else Color(0x55FFFFFF),
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
                     }
                 }

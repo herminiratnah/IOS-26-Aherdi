@@ -59,6 +59,8 @@ import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.example.MainActivity
 import com.example.ui.components.IOSStatusBar
+import com.example.ui.components.StandaloneOverlayControlCenter
+import com.example.ui.components.StandaloneOverlayNotificationCenter
 import com.example.viewmodel.DynamicIslandData
 import com.example.viewmodel.DynamicIslandMode
 import com.example.util.RootExecutor
@@ -123,10 +125,10 @@ class IOSOverlayService : Service() {
                 } else {
                     context.startService(intent)
                 }
-            } catch (e: Exception) {
+            } catch (_: Throwable) {
                 try {
                     context.startService(intent)
-                } catch (ignored: Exception) {}
+                } catch (_: Throwable) {}
             }
         }
 
@@ -173,18 +175,18 @@ class IOSOverlayService : Service() {
             WindowManager.LayoutParams.TYPE_PHONE
         }
 
-        var flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+        val defaultBarHeightPx = (52 * resources.displayMetrics.density).toInt()
+        val resId = resources.getIdentifier("status_bar_height", "dimen", "android")
+        val resPx = if (resId > 0) resources.getDimensionPixelSize(resId) else 0
+        val statusBarHeightPx = maxOf(resPx, defaultBarHeightPx)
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
-            @Suppress("DEPRECATION")
-            flags = flags or WindowManager.LayoutParams.FLAG_LAYOUT_IN_OVERSCAN
-        }
+        var flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
 
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
+            statusBarHeightPx,
             layoutType,
             flags,
             PixelFormat.TRANSLUCENT
@@ -215,6 +217,12 @@ class IOSOverlayService : Service() {
 
                 if (isLauncherForeground || !isOverlayEnabled) {
                     return@setContent
+                }
+
+                val overlayWallpaperRes by OverlayBridge.currentWallpaperRes.collectAsState()
+                val overlayWallpaperUri by OverlayBridge.currentWallpaperUri.collectAsState()
+                LaunchedEffect(overlayWallpaperRes, overlayWallpaperUri) {
+                    com.example.util.IOSBlurHelper.updateWallpaper(this@IOSOverlayService, overlayWallpaperRes, overlayWallpaperUri)
                 }
 
                 var currentTime by remember { mutableStateOf("09:41") }
@@ -268,6 +276,9 @@ class IOSOverlayService : Service() {
                                     )
                                 }
                                 "android.media.VOLUME_CHANGED_ACTION" -> {
+                                    val inCall = OverlayBridge.isInCall.value || OverlayBridge.dynamicIslandData.value.mode == DynamicIslandMode.CALL
+                                    if (inCall) return@onReceive
+
                                     val audio = getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
                                     val cur = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
                                     val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
@@ -290,29 +301,32 @@ class IOSOverlayService : Service() {
                                         when (newRingerMode) {
                                             AudioManager.RINGER_MODE_SILENT -> {
                                                 temporaryIslandData = DynamicIslandData(
-                                                    mode = DynamicIslandMode.NOTIFICATION,
-                                                    title = "Hening",
-                                                    subtitle = "Mode Senyap Aktif",
-                                                    icon = "volume_mute",
-                                                    accentColor = 0xFFFF3B30
+                                                    mode = DynamicIslandMode.SILENT_MODE,
+                                                    title = "Mode Hening",
+                                                    subtitle = "Hening Aktif",
+                                                    icon = "silent",
+                                                    accentColor = 0xFFFF3B30,
+                                                    isSilent = true
                                                 )
                                             }
                                             AudioManager.RINGER_MODE_VIBRATE -> {
                                                 temporaryIslandData = DynamicIslandData(
-                                                    mode = DynamicIslandMode.NOTIFICATION,
-                                                    title = "Getar",
-                                                    subtitle = "Mode Getar Aktif",
-                                                    icon = "volume",
-                                                    accentColor = 0xFFFF9500
+                                                    mode = DynamicIslandMode.SILENT_MODE,
+                                                    title = "Mode Getar",
+                                                    subtitle = "Getar Aktif",
+                                                    icon = "silent",
+                                                    accentColor = 0xFFFF9500,
+                                                    isSilent = true
                                                 )
                                             }
                                             AudioManager.RINGER_MODE_NORMAL -> {
                                                 temporaryIslandData = DynamicIslandData(
-                                                    mode = DynamicIslandMode.NOTIFICATION,
+                                                    mode = DynamicIslandMode.SILENT_MODE,
                                                     title = "Dering",
-                                                    subtitle = "Mode Suara Aktif",
-                                                    icon = "volume",
-                                                    accentColor = 0xFF34C759
+                                                    subtitle = "Suara Aktif",
+                                                    icon = "bell",
+                                                    accentColor = 0xFF34C759,
+                                                    isSilent = false
                                                 )
                                             }
                                         }
@@ -328,7 +342,18 @@ class IOSOverlayService : Service() {
                         addAction("android.media.VOLUME_CHANGED_ACTION")
                         addAction(AudioManager.RINGER_MODE_CHANGED_ACTION)
                     }
-                    registerReceiver(systemReceiver, filter)
+                    try {
+                        androidx.core.content.ContextCompat.registerReceiver(
+                            this@IOSOverlayService,
+                            systemReceiver,
+                            filter,
+                            androidx.core.content.ContextCompat.RECEIVER_EXPORTED
+                        )
+                    } catch (_: Exception) {
+                        try {
+                            registerReceiver(systemReceiver, filter)
+                        } catch (_: Exception) {}
+                    }
 
                     // Smart clipboard detection
                     val clipManager = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
@@ -384,6 +409,15 @@ class IOSOverlayService : Service() {
                 val callName by OverlayBridge.callName.collectAsState()
                 val callDuration by OverlayBridge.callDuration.collectAsState()
                 val bridgeFocusMode by OverlayBridge.currentFocusMode.collectAsState()
+                val secondaryIslandData by OverlayBridge.secondaryIslandData.collectAsState()
+                val isBluetoothConnected by OverlayBridge.isBluetoothConnected.collectAsState()
+                val isVpnConnected by OverlayBridge.isVpnConnected.collectAsState()
+                val isLocationActive by OverlayBridge.isLocationActive.collectAsState()
+                val isAlarmSet by OverlayBridge.isAlarmSet.collectAsState()
+                val isLowPowerMode by OverlayBridge.isLowPowerMode.collectAsState()
+                val showBatteryPercentage by OverlayBridge.showBatteryPercentage.collectAsState()
+                val networkSpeed by OverlayBridge.networkSpeed.collectAsState()
+                val showNetworkSpeed by OverlayBridge.showNetworkSpeed.collectAsState()
 
                 // Ensure display overscan is always 0,0,0,0 so Status Bar & Dynamic Island
                 // never follow downward and remain firmly pinned to the physical top (Y=0)
@@ -391,31 +425,32 @@ class IOSOverlayService : Service() {
                     RootExecutor.resetTopDisplayInset()
                 }
 
-                // Detect Foreground Package to smartly adapt Status Bar color to WhatsApp & all other apps
-                LaunchedEffect(Unit) {
+                // Detect Foreground Package to smartly adapt Status Bar color only when overlay is visible outside launcher
+                LaunchedEffect(isLauncherForeground, isOverlayEnabled) {
                     while (isActive) {
-                        try {
-                            val pkg = IOSTintedBackgroundManager.detectForegroundPackage(this@IOSOverlayService, packageName)
-                            if (pkg.isNotBlank() && pkg != currentForegroundPkg) {
-                                currentForegroundPkg = pkg
-                                OverlayBridge.currentForegroundPackage.value = pkg
-                            }
-                        } catch (_: Exception) {}
-                        delay(600)
+                        if (!isLauncherForeground && isOverlayEnabled) {
+                            try {
+                                val pkg = IOSTintedBackgroundManager.detectForegroundPackage(this@IOSOverlayService, packageName)
+                                if (pkg.isNotBlank() && pkg != currentForegroundPkg) {
+                                    currentForegroundPkg = pkg
+                                    OverlayBridge.currentForegroundPackage.value = pkg
+                                }
+                            } catch (_: Exception) {}
+                            delay(3000)
+                        } else {
+                            delay(4000)
+                        }
                     }
                 }
 
-                // Live Clock and Battery
+                // Live Clock (Eco-friendly 15s refresh interval)
                 LaunchedEffect(Unit) {
                     val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
                     val bm = getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
                     while (isActive) {
                         currentTime = sdf.format(Date())
-                        batteryPct = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: 100
-                        val status = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-                            ?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
-                        isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
-                        delay(2000)
+                        batteryPct = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: batteryPct
+                        delay(15000)
                     }
                 }
 
@@ -430,9 +465,25 @@ class IOSOverlayService : Service() {
                     }
                 }
 
-                // Unified Dynamic Island: Prioritize temporary smart HUDs, notifications, calls, music
+                // Unified Dynamic Island: Calls have highest priority, then bridge modes, temporary HUDs, notifications, music
                 val currentIslandData = remember(temporaryIslandData, bridgeIslandData, activeNotification, isInCall, isExpanded, isMusicPlaying, songTitle, songArtist, callName, callDuration) {
                     when {
+                        isInCall || bridgeIslandData.mode == DynamicIslandMode.CALL -> {
+                            if (bridgeIslandData.mode == DynamicIslandMode.CALL) {
+                                bridgeIslandData
+                            } else {
+                                DynamicIslandData(
+                                    mode = DynamicIslandMode.CALL,
+                                    title = callName.ifBlank { "Panggilan Masuk" },
+                                    subtitle = callDuration.ifBlank { "00:00" },
+                                    icon = "phone",
+                                    accentColor = 0xFF34C759
+                                )
+                            }
+                        }
+                        bridgeIslandData.mode != DynamicIslandMode.COMPACT -> {
+                            bridgeIslandData
+                        }
                         temporaryIslandData != null -> temporaryIslandData!!
                         activeNotification != null -> {
                             DynamicIslandData(
@@ -444,18 +495,6 @@ class IOSOverlayService : Service() {
                                 packageName = activeNotification!!.packageName,
                                 contentIntent = activeNotification!!.contentIntent
                             )
-                        }
-                        isInCall -> {
-                            DynamicIslandData(
-                                mode = DynamicIslandMode.CALL,
-                                title = callName.ifBlank { "Panggilan Masuk" },
-                                subtitle = callDuration.ifBlank { "00:00" },
-                                icon = "phone",
-                                accentColor = 0xFF34C759
-                            )
-                        }
-                        bridgeIslandData.mode != DynamicIslandMode.COMPACT -> {
-                            bridgeIslandData
                         }
                         isMusicPlaying && isExpanded -> {
                             DynamicIslandData(
@@ -485,64 +524,153 @@ class IOSOverlayService : Service() {
                     label = "StatusBarBgColor"
                 )
 
-                // Standalone iOS Status Bar container: owns dedicated top space at Y=0
-                // and perfectly blends with the active foreground app via dynamic tinted background
+                var isOverlayControlCenterOpen by remember { mutableStateOf(false) }
+                var isOverlayNotificationCenterOpen by remember { mutableStateOf(false) }
+
+                val isAnyCenterOpen = isOverlayControlCenterOpen || isOverlayNotificationCenterOpen
+                val expandedHeightPx = (220 * resources.displayMetrics.density).toInt()
+
+                LaunchedEffect(isAnyCenterOpen, isExpanded) {
+                    if (isAnyCenterOpen) {
+                        params.height = WindowManager.LayoutParams.MATCH_PARENT
+                        params.width = WindowManager.LayoutParams.MATCH_PARENT
+                        params.flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                                WindowManager.LayoutParams.FLAG_DIM_BEHIND
+                        params.dimAmount = 0.32f
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            params.flags = params.flags or WindowManager.LayoutParams.FLAG_BLUR_BEHIND
+                            try {
+                                params.setBlurBehindRadius((45 * resources.displayMetrics.density).toInt())
+                            } catch (_: Exception) {}
+                        }
+                    } else {
+                        params.height = if (isExpanded) expandedHeightPx else statusBarHeightPx
+                        params.width = WindowManager.LayoutParams.MATCH_PARENT
+                        params.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        params.dimAmount = 0.0f
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            try {
+                                params.setBlurBehindRadius(0)
+                            } catch (_: Exception) {}
+                        }
+                    }
+                    try {
+                        windowManager?.updateViewLayout(overlayView, params)
+                    } catch (_: Exception) {}
+                }
+
                 Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(animatedBgColor)
+                    modifier = if (isAnyCenterOpen) {
+                        Modifier.fillMaxSize()
+                    } else {
+                        Modifier
+                            .fillMaxWidth()
+                            .height(if (isExpanded) 220.dp else 52.dp)
+                    }
                 ) {
-                    IOSStatusBar(
-                        dynamicIslandData = currentIslandData,
-                        onDismissDynamicIsland = {
-                            isExpanded = false
-                            OverlayBridge.onDismissDynamicIsland?.invoke()
-                        },
-                        onOpenControlCenter = {
-                            expandSettingsOverApp()
-                        },
-                        onOpenNotificationCenter = {
-                            expandNotificationsOverApp()
-                        },
-                        currentTime = currentTime,
-                        batteryLevel = batteryPct,
-                        isBatteryCharging = isCharging,
-                        isWifiConnected = true,
-                        wifiSignalLevel = 4,
-                        cellularBars = 4,
-                        networkType = "5G",
-                        isAirplaneMode = false,
-                        isDarkIcons = isDarkIcons,
-                        focusMode = bridgeFocusMode,
-                        isMusicPlaying = isMusicPlaying,
-                        musicProgress = musicProgress,
-                        musicCurrentTimeStr = musicCurrentTimeStr,
-                        musicDurationStr = musicDurationStr,
-                        onMusicPlayPause = { OverlayBridge.onTogglePlayPause?.invoke() },
-                        onMusicNext = { OverlayBridge.onNextSong?.invoke() },
-                        onMusicPrev = { OverlayBridge.onPrevSong?.invoke() },
-                        onExpandMusic = { isExpanded = !isExpanded },
-                        onOpenIslandAction = {
-                            val intent = currentIslandData.contentIntent
-                            if (intent != null) {
-                                try {
-                                    intent.send()
-                                } catch (_: Exception) {}
-                            } else {
-                                val targetPkg = currentIslandData.packageName
-                                if (!targetPkg.isNullOrBlank()) {
+                    // Standalone iOS Status Bar container: owns dedicated top space at Y=0
+                    // and perfectly blends with the active foreground app via dynamic tinted background
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(animatedBgColor)
+                    ) {
+                        IOSStatusBar(
+                            dynamicIslandData = currentIslandData,
+                            onDismissDynamicIsland = {
+                                isExpanded = false
+                                OverlayBridge.onDismissDynamicIsland?.invoke()
+                            },
+                            onOpenControlCenter = {
+                                isOverlayNotificationCenterOpen = false
+                                isOverlayControlCenterOpen = true
+                            },
+                            onOpenNotificationCenter = {
+                                isOverlayControlCenterOpen = false
+                                isOverlayNotificationCenterOpen = true
+                            },
+                            currentTime = currentTime,
+                            batteryLevel = batteryPct,
+                            isBatteryCharging = isCharging,
+                            isWifiConnected = true,
+                            wifiSignalLevel = 4,
+                            cellularBars = 4,
+                            networkType = "5G",
+                            isAirplaneMode = false,
+                            isDarkIcons = isDarkIcons,
+                            focusMode = bridgeFocusMode,
+                            secondaryIslandData = secondaryIslandData,
+                            onSecondaryIslandClick = { OverlayBridge.onSecondaryIslandClick?.invoke() },
+                            networkSpeed = networkSpeed,
+                            showNetworkSpeed = showNetworkSpeed,
+                            showBatteryPercentage = showBatteryPercentage,
+                            isLowPowerMode = isLowPowerMode,
+                            isBluetoothConnected = isBluetoothConnected,
+                            isVpnConnected = isVpnConnected,
+                            isLocationActive = isLocationActive,
+                            isAlarmSet = isAlarmSet,
+                            isMusicPlaying = isMusicPlaying,
+                            musicProgress = musicProgress,
+                            musicCurrentTimeStr = musicCurrentTimeStr,
+                            musicDurationStr = musicDurationStr,
+                            onMusicPlayPause = { OverlayBridge.onTogglePlayPause?.invoke() },
+                            onMusicNext = { OverlayBridge.onNextSong?.invoke() },
+                            onMusicPrev = { OverlayBridge.onPrevSong?.invoke() },
+                            onExpandMusic = { isExpanded = !isExpanded },
+                            onAnswerCall = {
+                                OverlayBridge.isInCall.value = true
+                                OverlayBridge.dynamicIslandData.value = currentIslandData.copy(isIncomingCall = false)
+                                OverlayBridge.onAnswerCall?.invoke()
+                            },
+                            onDeclineCall = {
+                                OverlayBridge.isInCall.value = false
+                                OverlayBridge.dynamicIslandData.value = DynamicIslandData(mode = DynamicIslandMode.COMPACT)
+                                OverlayBridge.onDeclineCall?.invoke()
+                            },
+                            onAirPlaySelect = { dev ->
+                                OverlayBridge.dynamicIslandData.value = currentIslandData.copy(activeAirPlayDevice = dev)
+                            },
+                            onLockDevice = { OverlayBridge.onDoubleTapStatusBar?.invoke() },
+                            onOpenIslandAction = {
+                                val intent = currentIslandData.contentIntent
+                                if (intent != null) {
                                     try {
-                                        val launchIntent = packageManager.getLaunchIntentForPackage(targetPkg)
-                                        if (launchIntent != null) {
-                                            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                            startActivity(launchIntent)
-                                        }
+                                        intent.send()
                                     } catch (_: Exception) {}
+                                } else {
+                                    val targetPkg = currentIslandData.packageName
+                                    if (!targetPkg.isNullOrBlank()) {
+                                        try {
+                                            val launchIntent = packageManager.getLaunchIntentForPackage(targetPkg)
+                                            if (launchIntent != null) {
+                                                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                startActivity(launchIntent)
+                                            }
+                                        } catch (_: Exception) {}
+                                    }
                                 }
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    // Directly overlays Control Center on top of WhatsApp/Instagram without switching apps
+                    if (isOverlayControlCenterOpen) {
+                        StandaloneOverlayControlCenter(
+                            isOpen = true,
+                            onDismiss = { isOverlayControlCenterOpen = false }
+                        )
+                    }
+
+                    // Directly overlays Notification Center on top of WhatsApp/Instagram without switching apps
+                    if (isOverlayNotificationCenterOpen) {
+                        StandaloneOverlayNotificationCenter(
+                            isOpen = true,
+                            onDismiss = { isOverlayNotificationCenterOpen = false }
+                        )
+                    }
                 }
             }
         }
@@ -555,30 +683,54 @@ class IOSOverlayService : Service() {
         }
     }
 
-    private fun expandSettingsOverApp() {
-        try {
-            @Suppress("WrongConstant")
-            val sbm = getSystemService("statusbar")
-            val method = sbm?.javaClass?.getMethod("expandSettingsPanel")
-            method?.invoke(sbm)
-        } catch (e: Exception) {
-            serviceScope.launch {
-                com.example.util.RootExecutor.executeCommand("cmd statusbar expand-settings || service call statusbar 2")
+    private fun launchActionOverApp(action: String) {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+            putExtra("EXTRA_ACTION", action)
+        }
+
+        serviceScope.launch(Dispatchers.IO) {
+            // 1. If Root/Magisk is available, execute am start immediately: 100% bypasses all Android BAL restrictions
+            try {
+                if (RootExecutor.isRootAvailable()) {
+                    RootExecutor.execute("am start -n ${packageName}/com.example.MainActivity --es EXTRA_ACTION $action")
+                    return@launch
+                }
+            } catch (_: Exception) {}
+
+            // 2. Otherwise launch via PendingIntent with MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+            withContext(Dispatchers.Main) {
+                try {
+                    val reqCode = if (action == "OPEN_CONTROL_CENTER") 771 else 772
+                    val options = android.app.ActivityOptions.makeBasic()
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                        options.setPendingIntentBackgroundActivityStartMode(
+                            android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+                        )
+                    }
+                    val pi = android.app.PendingIntent.getActivity(
+                        this@IOSOverlayService,
+                        reqCode,
+                        intent,
+                        android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE,
+                        options.toBundle()
+                    )
+                    pi.send()
+                } catch (_: Exception) {
+                    try {
+                        startActivity(intent)
+                    } catch (_: Exception) {}
+                }
             }
         }
     }
 
+    private fun expandSettingsOverApp() {
+        launchActionOverApp("OPEN_CONTROL_CENTER")
+    }
+
     private fun expandNotificationsOverApp() {
-        try {
-            @Suppress("WrongConstant")
-            val sbm = getSystemService("statusbar")
-            val method = sbm?.javaClass?.getMethod("expandNotificationsPanel")
-            method?.invoke(sbm)
-        } catch (e: Exception) {
-            serviceScope.launch {
-                com.example.util.RootExecutor.executeCommand("cmd statusbar expand-notifications || service call statusbar 1")
-            }
-        }
+        launchActionOverApp("OPEN_NOTIFICATION_CENTER")
     }
 
     override fun onDestroy() {

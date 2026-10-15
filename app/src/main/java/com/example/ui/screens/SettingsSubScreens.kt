@@ -42,6 +42,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.CoroutineScope
@@ -52,8 +53,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.example.R
 import com.example.service.IOSOverlayService
+import com.example.ui.components.LockScreenCustomizerSheet
 import com.example.ui.theme.*
 import com.example.util.IOSFeedbackHelper
+import com.example.util.SiriAiEngine
+import com.example.data.IOSPersistenceManager
 import com.example.viewmodel.IOSViewModel
 
 enum class SettingsSubPage {
@@ -92,7 +96,8 @@ enum class SettingsSubPage {
     STANDBY,
     BACK_TAP,
     DEVELOPER,
-    BATTERY_HEALTH
+    BATTERY_HEALTH,
+    DYNAMIC_ISLAND
 }
 
 @Composable
@@ -371,6 +376,7 @@ fun WifiSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
     val isWifiConnected by viewModel.isWifiConnected.collectAsState()
     val currentWifiSsid by viewModel.currentWifiSsid.collectAsState()
     val scannedNetworks by viewModel.scannedWifiList.collectAsState()
+    val isWifiScanning by viewModel.isWifiScanning.collectAsState()
 
     var askToJoin by remember { mutableStateOf(true) }
     var autoHotspot by remember { mutableStateOf("Automatic") }
@@ -465,15 +471,36 @@ fun WifiSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text("AVAILABLE NETWORKS", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Gray, modifier = Modifier.padding(start = 8.dp))
-                        IconButton(onClick = { viewModel.scanWifiNetworks(context) }, modifier = Modifier.size(24.dp)) {
-                            Icon(Icons.Rounded.Refresh, contentDescription = "Scan", tint = Color(0xFF007AFF), modifier = Modifier.size(16.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            if (isWifiScanning) {
+                                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 1.5.dp, color = Color(0xFF007AFF))
+                            }
+                            IconButton(onClick = { viewModel.scanWifiNetworks(context) }, modifier = Modifier.size(24.dp)) {
+                                Icon(Icons.Rounded.Refresh, contentDescription = "Scan", tint = Color(0xFF007AFF), modifier = Modifier.size(16.dp))
+                            }
                         }
                     }
                 }
 
                 item {
                     IOSSettingsCard {
-                        scannedNetworks.forEachIndexed { index, (name, isLocked) ->
+                        if (scannedNetworks.isEmpty()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Text(
+                                    text = if (isWifiScanning) "Scanning for Wi-Fi networks..." else "No Wi-Fi networks found. Tap refresh to scan.",
+                                    fontSize = 13.sp,
+                                    color = Color.Gray,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        } else {
+                            scannedNetworks.forEachIndexed { index, (name, isLocked) ->
                             val isThisConnected = isWifiConnected && currentWifiSsid == name
                             Row(
                                 modifier = Modifier
@@ -520,6 +547,7 @@ fun WifiSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                             }
                         }
                     }
+                }
                 }
 
                 item {
@@ -740,6 +768,7 @@ fun BluetoothSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
 fun CellularSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
     val context = LocalContext.current
     val cellularEnabled by viewModel.cellularEnabled.collectAsState()
+    val cellularCarrierName by viewModel.cellularCarrierName.collectAsState()
     var dataRoaming by remember { mutableStateOf(false) }
     var voiceData by remember { mutableStateOf("5G Auto") }
     var lowDataMode by remember { mutableStateOf(false) }
@@ -817,7 +846,12 @@ fun CellularSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
 
                 item {
                     IOSSettingsCard {
-                        IOSSettingsRow(title = "Telkomsel 5G (eSIM)", detail = "Primary • 0812-8888-9999", icon = Icons.Rounded.SimCard, iconBg = Color(0xFF007AFF))
+                        IOSSettingsRow(
+                            title = if (cellularCarrierName.isNotBlank() && cellularCarrierName != "Cellular") "$cellularCarrierName (Primary SIM)" else "Primary SIM (Cellular)",
+                            detail = if (cellularEnabled) "Active • Primary" else "Off",
+                            icon = Icons.Rounded.SimCard,
+                            iconBg = Color(0xFF007AFF)
+                        )
                         HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
                         IOSSettingsRow(title = "Wi-Fi Calling", detail = "On")
                         HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
@@ -1188,6 +1222,45 @@ fun SystemOverlaySubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                         }
                     )
                 }
+            }
+
+            item {
+                val isVolumeInterceptionActive by viewModel.isVolumeInterceptionActive.collectAsState()
+
+                IOSSettingsCard {
+                    IOSSettingsToggleRow(
+                        title = "Blokir Dialog Volume Android",
+                        checked = isVolumeInterceptionActive,
+                        onCheckedChange = {
+                            viewModel.toggleVolumeInterceptionRoot(context)
+                        },
+                        icon = Icons.Rounded.VolumeUp,
+                        iconBg = Color(0xFF007AFF)
+                    )
+                    HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
+                    IOSSettingsRow(
+                        title = "Buka Aksesibilitas Sistem (Manual)",
+                        detail = if (isVolumeInterceptionActive) "Aktif" else "Atur",
+                        icon = Icons.Rounded.Accessibility,
+                        iconBg = Color(0xFFFF9500),
+                        onClick = {
+                            try {
+                                val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                viewModel.showDynamicIslandNotification("Aksesibilitas", "Buka Pengaturan -> Aksesibilitas", "volume", 0xFFFF9500)
+                            }
+                        }
+                    )
+                }
+                Text(
+                    text = "Mencegah slider/dialog volume bawaan Android muncul saat menekan tombol volume fisik di WhatsApp, Setelan, YouTube, dll. Volume dialihkan sepenuhnya ke pil Dynamic Island.",
+                    fontSize = 13.sp,
+                    color = Color.Gray,
+                    modifier = Modifier.padding(start = 8.dp, top = 6.dp)
+                )
                 Spacer(modifier = Modifier.height(20.dp))
             }
         }
@@ -2050,6 +2123,8 @@ fun WallpaperSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
     val currentWallpaperRes by viewModel.currentWallpaperRes.collectAsState()
     val currentWallpaperName by viewModel.currentWallpaperName.collectAsState()
     val currentWallpaperUri by viewModel.currentWallpaperUri.collectAsState()
+    val homeScreenWallpaperRes by viewModel.homeScreenWallpaperRes.collectAsState()
+    val homeScreenWallpaperUri by viewModel.homeScreenWallpaperUri.collectAsState()
     val lockScreenConfig by viewModel.lockScreenConfig.collectAsState()
     val currentTime by viewModel.currentTimeFormatted.collectAsState()
 
@@ -2067,43 +2142,53 @@ fun WallpaperSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
         }
     }
 
+    val homePhotoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.setHomeScreenWallpaper(
+                resId = 0,
+                name = "Custom Home Photo",
+                uri = uri.toString(),
+                context = context
+            )
+        }
+    }
+
     val wallpapers = remember {
         listOf(
-            WallpaperChoice("mountain_depth", "Alpine Mountain Peak", "iOS 26 Depth Effect", R.drawable.wallpaper_mountain_depth, hasDepthEffect = true, depthTheme = "mountain"),
-            WallpaperChoice("planet_depth", "Celestial Horizon", "iOS 26 Depth Effect", R.drawable.wallpaper_planet_depth, hasDepthEffect = true, depthTheme = "planet"),
-            WallpaperChoice("dune_depth", "Dune Twilight", "iOS 26 Depth Effect", R.drawable.wallpaper_dune, hasDepthEffect = true, depthTheme = "dune"),
-            WallpaperChoice("skyline_depth", "Cyber Metropolis", "iOS 26 Depth Effect", R.drawable.wallpaper_neon_waves, hasDepthEffect = true, depthTheme = "skyline"),
-            WallpaperChoice("glass_depth", "Ambient Prism Ribbon", "iOS 26 Depth Effect", R.drawable.wallpaper_geometry, hasDepthEffect = true, depthTheme = "glass_ribbon"),
-            WallpaperChoice("ios26", "iOS 26 Ambient", "Featured", R.drawable.ios26_wallpaper),
-            WallpaperChoice("titanium", "iOS 18 Pro Titanium", "Flagship", R.drawable.wallpaper_titanium),
-            WallpaperChoice("twilight", "Twilight Gradient", "Fluid Abstract", R.drawable.wallpaper_twilight),
-            WallpaperChoice("astronomy", "Astronomy & Earth", "Astronomy", R.drawable.wallpaper_astronomy),
-            WallpaperChoice("aurora", "Aurora Fjord", "Nature", R.drawable.wallpaper_aurora),
-            WallpaperChoice("alpine", "Alpine Vista", "Nature", R.drawable.wallpaper_alpine),
-            WallpaperChoice("deep_space", "Cosmic Nebula", "Astronomy", R.drawable.wallpaper_deep_space),
-            WallpaperChoice("valley", "Monument Sunset", "Collections", R.drawable.monument_valley_art),
-            WallpaperChoice("nature", "Emerald Forest", "Nature", R.drawable.photo_widget_nature)
+            WallpaperChoice("mountain_depth", "Alpine Mountain Peak", "Classic iOS 26 Depth Effect", R.drawable.wallpaper_alpine, hasDepthEffect = true, depthTheme = "mountain"),
+            WallpaperChoice("twilight_clouds", "Twilight City Sunset", "Desain 1 • Awan Senja Emas", R.drawable.wp_twilight_clouds, hasDepthEffect = true, depthTheme = "twilight_clouds"),
+            WallpaperChoice("monochrome_wave", "Monochrome Tidal Glow", "Desain 2 • Ombak Laut Hitam Putih", R.drawable.wp_monochrome_wave, hasDepthEffect = true, depthTheme = "monochrome_wave"),
+            WallpaperChoice("golden_dunes", "Golden Desert Dunes", "Desain 3 • Gumuk Pasir Sahara", R.drawable.wp_golden_dunes, hasDepthEffect = true, depthTheme = "golden_dunes"),
+            WallpaperChoice("coastal_flora", "Golden Coastal Sunset", "Desain 4 • Tumbuhan Tebing Laut", R.drawable.wp_coastal_flora, hasDepthEffect = true, depthTheme = "coastal_flora"),
+            WallpaperChoice("daisy_meadow", "Dreamy Daisy Meadow", "Desain 5 • Bunga Daisy Pegunungan", R.drawable.wp_daisy_meadow, hasDepthEffect = true, depthTheme = "daisy_meadow"),
+            WallpaperChoice("sunset_reeds", "Golden Lake Reeds", "Desain 6 • Rumput Emas Danau", R.drawable.wp_sunset_reeds, hasDepthEffect = true, depthTheme = "sunset_reeds"),
+            WallpaperChoice("crystal_glass", "Crystal Glass Sky", "Desain 7 • Pita Kaca Kristal", R.drawable.wp_crystal_glass, hasDepthEffect = true, depthTheme = "crystal_glass"),
+            WallpaperChoice("glass_sanctuary", "Glass Clock Sanctuary", "Desain 8 • Zen Sanctuary Kaca", R.drawable.wp_glass_sanctuary, hasDepthEffect = true, depthTheme = "glass_sanctuary"),
+            WallpaperChoice("glass_still_life", "Glass Still Life", "Desain 9 • Bola Kaca & Pita Akrilik", R.drawable.wp_glass_still_life, hasDepthEffect = true, depthTheme = "glass_still_life")
         )
     }
 
     var selectedWallpaper by remember { mutableStateOf(wallpapers.firstOrNull { it.resId == currentWallpaperRes } ?: wallpapers[0]) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(IOSSystemGray6)
-    ) {
-        SettingsTopBar(title = "Wallpaper", onBack = onBack)
-
-        LazyColumn(
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .background(IOSSystemGray6)
         ) {
-            // Dual Mockup Previews
-            item {
-                Text("CURRENT WALLPAPER PAIR", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Gray, modifier = Modifier.padding(start = 8.dp))
+            SettingsTopBar(title = "Wallpaper & Lock Screen", onBack = onBack)
+
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Dual Mockup Previews
+                item {
+                    Text("CURRENT WALLPAPER PAIR", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Gray, modifier = Modifier.padding(start = 8.dp))
                 Spacer(modifier = Modifier.height(6.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -2118,13 +2203,17 @@ fun WallpaperSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                                 .height(220.dp)
                                 .clip(RoundedCornerShape(20.dp))
                                 .background(Color.Black)
+                                .clickable { viewModel.openApp(com.example.model.AppId.DEPTH_STUDIO) }
                         ) {
+                            val liveDate = remember {
+                                java.text.SimpleDateFormat("EEEE, d MMMM", java.util.Locale.getDefault()).format(java.util.Date())
+                            }
                             com.example.ui.components.IOSDepthWallpaperRenderer(
                                 config = lockScreenConfig,
                                 wallpaperRes = currentWallpaperRes,
                                 wallpaperUri = currentWallpaperUri,
                                 currentTime = currentTime,
-                                currentDate = "Tuesday, Sep 8",
+                                currentDate = liveDate,
                                 batteryLevel = 90,
                                 isBatteryCharging = false,
                                 modifier = Modifier.fillMaxSize()
@@ -2147,12 +2236,24 @@ fun WallpaperSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                             }
                         }
                         Spacer(modifier = Modifier.height(6.dp))
-                        Text("Lock Screen", fontSize = 12.sp, color = Color.Gray, fontWeight = FontWeight.Medium)
+                        Text("Layar Terkunci", fontSize = 12.sp, color = Color.Black, fontWeight = FontWeight.SemiBold)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Button(
+                            onClick = { viewModel.openApp(com.example.model.AppId.DEPTH_STUDIO) },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF5856D6)),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 5.dp),
+                            modifier = Modifier.height(30.dp)
+                        ) {
+                            Icon(Icons.Rounded.Layers, contentDescription = null, tint = Color.White, modifier = Modifier.size(13.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Depth Studio", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                        }
                     }
 
                     Spacer(modifier = Modifier.width(20.dp))
 
-                    // Home Screen Mini Mockup
+                    // Home Screen Mini Mockup (Independent Wallpaper!)
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Box(
                             modifier = Modifier
@@ -2161,16 +2262,16 @@ fun WallpaperSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                                 .clip(RoundedCornerShape(20.dp))
                                 .background(Color.Black)
                         ) {
-                            if (!currentWallpaperUri.isNullOrBlank()) {
+                            if (!homeScreenWallpaperUri.isNullOrBlank()) {
                                 AsyncImage(
-                                    model = currentWallpaperUri,
+                                    model = homeScreenWallpaperUri,
                                     contentDescription = "Home Screen Wallpaper",
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier.fillMaxSize()
                                 )
                             } else {
                                 Image(
-                                    painter = painterResource(id = if (currentWallpaperRes != 0) currentWallpaperRes else R.drawable.wallpaper_mountain_depth),
+                                    painter = com.example.ui.components.safePainterResource(id = homeScreenWallpaperRes, fallbackId = R.drawable.wallpaper_alpine),
                                     contentDescription = "Home Screen Wallpaper",
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier.fillMaxSize()
@@ -2216,79 +2317,81 @@ fun WallpaperSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                             }
                         }
                         Spacer(modifier = Modifier.height(6.dp))
-                        Text("Home Screen", fontSize = 12.sp, color = Color.Gray, fontWeight = FontWeight.Medium)
+                        Text("Layar Utama", fontSize = 12.sp, color = Color.Black, fontWeight = FontWeight.SemiBold)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Button(
+                            onClick = {
+                                homePhotoPickerLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF007AFF)),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 5.dp),
+                            modifier = Modifier.height(30.dp)
+                        ) {
+                            Icon(Icons.Rounded.Photo, contentDescription = null, tint = Color.White, modifier = Modifier.size(13.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Pilih Foto", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
 
-            // Depth Effect & Customizer Card
+            // Unified Depth Studio Card for Lockscreen
             item {
                 IOSSettingsCard {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(
+                                        androidx.compose.ui.graphics.Brush.linearGradient(
+                                            listOf(Color(0xFF5856D6), Color(0xFF007AFF))
+                                        )
+                                    ),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(34.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(Color(0xFF007AFF)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Layers,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                                Column {
-                                    Text(
-                                        text = "Depth Effect (Efek Kedalaman)",
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = Color.Black
-                                    )
-                                    Text(
-                                        text = "Jam di balik gunung / horizon wallpaper",
-                                        fontSize = 12.sp,
-                                        color = Color.Gray
-                                    )
-                                }
-                            }
-
-                            Switch(
-                                checked = lockScreenConfig.depthEffectEnabled,
-                                onCheckedChange = { isChecked ->
-                                    viewModel.updateLockScreenConfig { it.copy(depthEffectEnabled = isChecked) }
-                                },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Color.White,
-                                    checkedTrackColor = Color(0xFF34C759)
+                                Icon(
+                                    imageVector = Icons.Rounded.Layers,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(24.dp)
                                 )
-                            )
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Pengaturan Layar Kunci di Depth Studio",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.Black
+                                )
+                                Text(
+                                    text = "Semua font, warna jam, posisi free-transform, pinch-zoom, dan efek kedalaman 3D diatur 100% di Depth Studio.",
+                                    fontSize = 12.sp,
+                                    color = Color.Gray,
+                                    lineHeight = 16.sp
+                                )
+                            }
                         }
-
-                        HorizontalDivider(color = Color.LightGray.copy(alpha = 0.3f))
 
                         Button(
                             onClick = {
-                                viewModel.openLockScreenCustomize()
+                                viewModel.openApp(com.example.model.AppId.DEPTH_STUDIO)
                             },
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF007AFF))
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF5856D6))
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.AutoAwesome,
@@ -2297,20 +2400,30 @@ fun WallpaperSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                                 modifier = Modifier.size(16.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Customize Fonts, Colors & Widgets", color = Color.White, fontWeight = FontWeight.SemiBold)
+                            Text("Buka AI Depth Wallpaper Studio", color = Color.White, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
             }
 
-            // Choose from Photos Action Card
+            // Independent Home Screen Photo Picker Card
+            item {
+                Text(
+                    "PILIH WALLPAPER KHUSUS LAYAR UTAMA (HOMESCREEN)",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.Gray,
+                    modifier = Modifier.padding(start = 8.dp)
+                )
+            }
+
             item {
                 IOSSettingsCard {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                photoPickerLauncher.launch(
+                                homePhotoPickerLauncher.launch(
                                     PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                                 )
                             }
@@ -2322,7 +2435,7 @@ fun WallpaperSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFF5856D6)),
+                                .background(Color(0xFF007AFF)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
@@ -2334,13 +2447,13 @@ fun WallpaperSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                         }
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Choose from Photos",
-                                fontSize = 16.sp,
+                                text = "Pilih Foto Sendiri untuk Layar Utama",
+                                fontSize = 15.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color.Black
                             )
                             Text(
-                                text = "Pick any image from your gallery",
+                                text = "Layar utama terpisah tanpa mengubah layar kunci",
                                 fontSize = 12.sp,
                                 color = Color.Gray
                             )
@@ -2355,37 +2468,31 @@ fun WallpaperSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
             }
 
             item {
-                Text("WALLPAPER GALLERY (iOS 26 Depth & Classics)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Gray, modifier = Modifier.padding(start = 8.dp))
+                Text(
+                    "KOLEKSI WALLPAPER LAYAR UTAMA (HOMESCREEN)",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.Gray,
+                    modifier = Modifier.padding(start = 8.dp)
+                )
             }
 
-            // Wallpapers Collection Cards
+            // Wallpapers Collection Cards for Home Screen
             items(wallpapers) { wall ->
-                val isCurrent = currentWallpaperUri.isNullOrBlank() && wall.resId == currentWallpaperRes
+                val isCurrentHome = homeScreenWallpaperUri.isNullOrBlank() && wall.resId == homeScreenWallpaperRes
                 IOSSettingsCard {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                selectedWallpaper = wall
-                                viewModel.setWallpaper(wall.resId, wall.name, null, context)
-                                if (wall.hasDepthEffect) {
-                                    viewModel.updateLockScreenConfig {
-                                        it.copy(
-                                            depthEffectEnabled = true,
-                                            depthTheme = wall.depthTheme,
-                                            wallpaperId = wall.id
-                                        )
-                                    }
-                                } else {
-                                    viewModel.updateLockScreenConfig { it.copy(wallpaperId = wall.id) }
-                                }
+                                viewModel.setHomeScreenWallpaper(wall.resId, wall.name, null, context)
                             }
                             .padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         Image(
-                            painter = painterResource(id = wall.resId),
+                            painter = com.example.ui.components.safePainterResource(id = wall.resId, fallbackId = R.drawable.wallpaper_alpine),
                             contentDescription = wall.name,
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
@@ -2394,39 +2501,19 @@ fun WallpaperSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                         )
 
                         Column(modifier = Modifier.weight(1f)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text(
-                                    text = wall.name,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Color.Black
-                                )
-                            }
+                            Text(
+                                text = wall.name,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.Black
+                            )
                             Spacer(modifier = Modifier.height(2.dp))
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                if (wall.hasDepthEffect) {
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(Color(0xFF007AFF).copy(alpha = 0.12f))
-                                            .padding(horizontal = 5.dp, vertical = 1.dp)
-                                    ) {
-                                        Text("✨ Depth Effect", color = Color(0xFF007AFF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                }
-                                Text(
-                                    text = wall.category,
-                                    fontSize = 12.sp,
-                                    color = Color.Gray
-                                )
-                            }
-                            if (isCurrent) {
+                            Text(
+                                text = wall.category,
+                                fontSize = 12.sp,
+                                color = Color.Gray
+                            )
+                            if (isCurrentHome) {
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Box(
                                     modifier = Modifier
@@ -2434,41 +2521,29 @@ fun WallpaperSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                                         .background(Color(0xFF34C759).copy(alpha = 0.15f))
                                         .padding(horizontal = 6.dp, vertical = 2.dp)
                                 ) {
-                                    Text("Active Wallpaper", color = Color(0xFF34C759), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("Layar Utama Aktif", color = Color(0xFF34C759), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
 
-                        if (isCurrent) {
+                        if (isCurrentHome) {
                             Icon(
                                 imageVector = Icons.Rounded.CheckCircle,
-                                contentDescription = "Selected",
-                                tint = Color(0xFF007AFF),
+                                contentDescription = "Selected for Home",
+                                tint = Color(0xFF34C759),
                                 modifier = Modifier.size(24.dp)
                             )
                         } else {
                             Button(
                                 onClick = {
-                                    selectedWallpaper = wall
-                                    viewModel.setWallpaper(wall.resId, wall.name, null, context)
-                                    if (wall.hasDepthEffect) {
-                                        viewModel.updateLockScreenConfig {
-                                            it.copy(
-                                                depthEffectEnabled = true,
-                                                depthTheme = wall.depthTheme,
-                                                wallpaperId = wall.id
-                                            )
-                                        }
-                                    } else {
-                                        viewModel.updateLockScreenConfig { it.copy(wallpaperId = wall.id) }
-                                    }
+                                    viewModel.setHomeScreenWallpaper(wall.resId, wall.name, null, context)
                                 },
                                 shape = RoundedCornerShape(14.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF007AFF)),
-                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                                 modifier = Modifier.height(34.dp)
                             ) {
-                                Text("Set", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                Text("Pasang", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
                             }
                         }
                     }
@@ -2480,6 +2555,7 @@ fun WallpaperSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
             }
         }
     }
+}
 }
 
 // 15. Accessibility SubPage (with Integrasi Sistem Android)
@@ -2602,14 +2678,6 @@ fun FaceIdPasscodeSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
             item {
                 IOSSettingsCard {
                     IOSSettingsToggleRow(
-                        title = "iPhone Unlock with Face ID",
-                        checked = isFaceIdEnabled,
-                        onCheckedChange = { enabled -> viewModel.toggleFaceId(enabled) },
-                        icon = Icons.Rounded.Face,
-                        iconBg = Color(0xFF34C759)
-                    )
-                    HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
-                    IOSSettingsToggleRow(
                         title = "Turn Passcode On",
                         checked = isPasscodeEnabled,
                         onCheckedChange = { enabled -> viewModel.togglePasscode(enabled) },
@@ -2621,6 +2689,14 @@ fun FaceIdPasscodeSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                         title = "Change Passcode",
                         detail = "",
                         onClick = { showChangePasscodeDialog = true }
+                    )
+                    HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
+                    IOSSettingsToggleRow(
+                        title = "Simulated Face ID (Experimental)",
+                        checked = isFaceIdEnabled,
+                        onCheckedChange = { enabled -> viewModel.toggleFaceId(enabled) },
+                        icon = Icons.Rounded.Face,
+                        iconBg = Color(0xFF34C759)
                     )
                 }
             }
@@ -2681,13 +2757,32 @@ fun FaceIdPasscodeSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
     }
 }
 
-// 17. Siri & Apple Intelligence SubPage (Clean & Non-overlapping)
+// 17. Siri & Apple Intelligence SubPage (Clean & Non-overlapping with Gemini API Config)
 @Composable
 fun SiriSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
     var listenForHeySiri by remember { mutableStateOf(true) }
     var pressSideButton by remember { mutableStateOf(true) }
     var allowSiriWhenLocked by remember { mutableStateOf(true) }
     var writingTools by remember { mutableStateOf(true) }
+
+    // Gemini API Key State
+    var savedApiKey by remember {
+        mutableStateOf(IOSPersistenceManager.getGeminiApiKey(context))
+    }
+    var selectedModel by remember {
+        mutableStateOf(IOSPersistenceManager.getGeminiModel(context))
+    }
+    var apiKeyInput by remember { mutableStateOf(savedApiKey) }
+    var isTestingConnection by remember { mutableStateOf(false) }
+    var testResultStatus by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
+    var showApiKeyInfoDialog by remember { mutableStateOf(false) }
+
+    val isGeminiActive = remember(savedApiKey) {
+        SiriAiEngine.isGeminiConfigured(context)
+    }
 
     Column(
         modifier = Modifier
@@ -2703,13 +2798,250 @@ fun SiriSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             item {
-                Text("APPLE INTELLIGENCE", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Gray, modifier = Modifier.padding(start = 8.dp))
+                Text(
+                    text = "APPLE INTELLIGENCE (GEMINI AI)",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.Gray,
+                    modifier = Modifier.padding(start = 8.dp)
+                )
+            }
+
+            // Card 1: Gemini API Configuration & Status
+            item {
+                IOSSettingsCard {
+                    // Status Badge Row
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(30.dp)
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .background(Color(0xFF5856D6)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.AutoAwesome,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = "Status AI Siri",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color.Black
+                                )
+                                Text(
+                                    text = if (isGeminiActive) "Aktif (Google Gemini: $selectedModel)" else "Mode Offline (Perintah Lokal)",
+                                    fontSize = 12.sp,
+                                    color = if (isGeminiActive) Color(0xFF34C759) else Color(0xFFFF9500),
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+
+                        IconButton(onClick = { showApiKeyInfoDialog = true }) {
+                            Icon(
+                                imageVector = Icons.Rounded.HelpOutline,
+                                contentDescription = "Bantuan API Key",
+                                tint = Color(0xFF007AFF),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
+
+                    // Model Selection Chips
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "Pilih Model AI",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.Black
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            listOf("gemini-flash-latest", "gemini-3.1-flash-lite-preview", "gemini-3.5-flash", "gemini-3.8-flash").forEach { modelName ->
+                                val isSelected = selectedModel == modelName
+                                val label = when (modelName) {
+                                    "gemini-flash-latest" -> "⚡ Flash (Cepat)"
+                                    "gemini-3.1-flash-lite-preview" -> "🚀 Flash Lite"
+                                    "gemini-3.5-flash" -> "3.5 Flash"
+                                    "gemini-3.8-flash" -> "3.8 Flash"
+                                    else -> "Flash"
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (isSelected) Color(0xFF007AFF) else Color(0xFFE5E5EA))
+                                        .clickable {
+                                            selectedModel = modelName
+                                            IOSPersistenceManager.saveGeminiModel(context, modelName)
+                                            testResultStatus = null
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        text = label,
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isSelected) Color.White else Color.Black
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
+
+                    // Input Field for Gemini API Key
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "Google Gemini API Key",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.Black
+                        )
+
+                        OutlinedTextField(
+                            value = apiKeyInput,
+                            onValueChange = {
+                                apiKeyInput = it.trim()
+                                testResultStatus = null
+                            },
+                            placeholder = { Text("Tempel API Key AI Studio di sini...", fontSize = 13.sp) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color(0xFF007AFF),
+                                unfocusedBorderColor = Color(0xFFD1D1D6)
+                            )
+                        )
+
+                        // Action Buttons: Simpan & Tes Koneksi
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    IOSPersistenceManager.saveGeminiApiKey(context, apiKeyInput)
+                                    IOSPersistenceManager.saveGeminiModel(context, selectedModel)
+                                    savedApiKey = apiKeyInput
+                                    viewModel.showDynamicIslandNotification("Siri", "API Key disimpan!", "sparkles", 0xFF34C759)
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF007AFF)),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Rounded.Save, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Simpan Key", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    val keyToTest = apiKeyInput.ifBlank { savedApiKey }
+                                    isTestingConnection = true
+                                    testResultStatus = null
+                                    coroutineScope.launch {
+                                        val result = SiriAiEngine.testApiKey(keyToTest, context)
+                                        isTestingConnection = false
+                                        testResultStatus = result
+                                    }
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.weight(1f),
+                                enabled = !isTestingConnection && (apiKeyInput.isNotBlank() || savedApiKey.isNotBlank())
+                            ) {
+                                if (isTestingConnection) {
+                                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Menguji...", fontSize = 12.sp)
+                                } else {
+                                    Icon(Icons.Rounded.NetworkCheck, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Tes Koneksi", fontSize = 13.sp)
+                                }
+                            }
+                        }
+
+                        // Test Status Banner
+                        testResultStatus?.let { (success, message) ->
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (success) Color(0x2034C759) else Color(0x20FF3B30))
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = message,
+                                    color = if (success) Color(0xFF34C759) else Color(0xFFFF3B30),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+
+                        if (savedApiKey.isNotBlank()) {
+                            TextButton(
+                                onClick = {
+                                    IOSPersistenceManager.saveGeminiApiKey(context, "")
+                                    savedApiKey = ""
+                                    apiKeyInput = ""
+                                    testResultStatus = null
+                                    viewModel.showDynamicIslandNotification("Siri", "API Key dihapus", "delete", 0xFFFF3B30)
+                                },
+                                modifier = Modifier.align(Alignment.End)
+                            ) {
+                                Text("Hapus API Key", color = Color(0xFFFF3B30), fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                Text(
+                    text = "FITUR KECERDASAN",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.Gray,
+                    modifier = Modifier.padding(start = 8.dp)
+                )
             }
 
             item {
                 IOSSettingsCard {
                     IOSSettingsToggleRow(
-                        title = "Writing Tools",
+                        title = "Writing Tools & Chat Pintar",
                         checked = writingTools,
                         onCheckedChange = { writingTools = it },
                         icon = Icons.Rounded.Edit,
@@ -2717,14 +3049,25 @@ fun SiriSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                     )
                     HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
                     IOSSettingsRow(
-                        title = "Siri Voice",
-                        detail = "American (Voice 4)"
+                        title = "Bahasa Respon Siri",
+                        detail = "Bahasa Indonesia (Natural)"
+                    )
+                    HorizontalDivider(color = IOSBorderGray, thickness = 0.5.dp)
+                    IOSSettingsRow(
+                        title = "Model AI",
+                        detail = if (isGeminiActive) "gemini-2.5-flash (Online)" else "Smart Rule Engine (Offline)"
                     )
                 }
             }
 
             item {
-                Text("ASK SIRI", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Gray, modifier = Modifier.padding(start = 8.dp))
+                Text(
+                    text = "ASK SIRI",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.Gray,
+                    modifier = Modifier.padding(start = 8.dp)
+                )
             }
 
             item {
@@ -2749,9 +3092,52 @@ fun SiriSubPage(viewModel: IOSViewModel, onBack: () -> Unit) {
                         onCheckedChange = { allowSiriWhenLocked = it }
                     )
                 }
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(24.dp))
             }
         }
+    }
+
+    // Info Dialog: How to get free API Key
+    if (showApiKeyInfoDialog) {
+        AlertDialog(
+            onDismissRequest = { showApiKeyInfoDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.Rounded.VpnKey, contentDescription = null, tint = Color(0xFF007AFF))
+                    Text("Cara Dapat API Key Gratis", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "1. Buka browser dan kunjungi:\naistudio.google.com/apikey",
+                        fontSize = 14.sp,
+                        color = Color.Black
+                    )
+                    Text(
+                        text = "2. Login dengan akun Google kamu.",
+                        fontSize = 14.sp,
+                        color = Color.Black
+                    )
+                    Text(
+                        text = "3. Klik tombol \"Create API key\", lalu salin kodenya.",
+                        fontSize = 14.sp,
+                        color = Color.Black
+                    )
+                    Text(
+                        text = "4. Tempelkan kodenya di kolom ini lalu klik \"Simpan Key\". Siri langsung bisa diajak ngobrol bebas!",
+                        fontSize = 14.sp,
+                        color = Color(0xFF34C759),
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showApiKeyInfoDialog = false }) {
+                    Text("Mengerti", fontWeight = FontWeight.Bold, color = Color(0xFF007AFF))
+                }
+            }
+        )
     }
 }
 

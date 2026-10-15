@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
 import android.content.Intent
 import android.provider.Settings
 import androidx.compose.animation.*
@@ -51,6 +52,7 @@ fun RootToolsApp(
     val retinaDpi by viewModel.retinaDpi.collectAsState()
     val spoofedModel by viewModel.spoofedModel.collectAsState()
     val isTopDisplayInsetActive by viewModel.isTopDisplayInsetActive.collectAsState()
+    val isVolumeInterceptionActive by viewModel.isVolumeInterceptionActive.collectAsState()
     val rootLogs by viewModel.rootLogs.collectAsState()
 
     // Sync saved root states immediately on open so toggles never revert
@@ -61,6 +63,10 @@ fun RootToolsApp(
     var customShellCommand by remember { mutableStateOf("") }
     var showRebootDialog by remember { mutableStateOf<String?>(null) }
 
+    BackHandler(enabled = showRebootDialog != null) {
+        showRebootDialog = null
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -69,14 +75,8 @@ fun RootToolsApp(
             .navigationBarsPadding()
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Status bar
-            IOSStatusBar(
-                dynamicIslandData = dynamicIslandData,
-                onDismissDynamicIsland = { viewModel.dismissDynamicIsland() },
-                onOpenControlCenter = { viewModel.toggleControlCenter() },
-                onOpenNotificationCenter = { viewModel.toggleNotificationCenter() },
-                isDarkIcons = false
-            )
+            // Spacer for Single Global Status Bar
+            Spacer(modifier = Modifier.height(44.dp))
 
             LazyColumn(
                 modifier = Modifier
@@ -175,6 +175,7 @@ fun RootToolsApp(
                                 onClick = {
                                     if (!isImmersiveLocked) viewModel.toggleImmersiveRoot(context)
                                     if (!isTopDisplayInsetActive) viewModel.toggleTopDisplayInsetRoot(context)
+                                    if (!isVolumeInterceptionActive) viewModel.toggleVolumeInterceptionRoot(context)
                                     viewModel.cleanJ2PrimeRamRoot()
                                     if (!cpuBoostEnabled) viewModel.toggleCpuBoostRoot(context)
                                 },
@@ -247,6 +248,19 @@ fun RootToolsApp(
                         isActive = isNotificationListenerGranted,
                         badgeType = RestartBadgeType.INSTANT,
                         onToggle = { viewModel.grantNotificationListenerViaRoot(context) }
+                    )
+                }
+
+                // Blokir Dialog Volume Android (Dynamic Island Only)
+                item {
+                    RootToggleCard(
+                        icon = Icons.Rounded.VolumeUp,
+                        iconColor = IOSBlue,
+                        title = "Blokir Dialog Volume Android (Dynamic Island Saja)",
+                        subtitle = "Cegah dialog/slider volume bawaan Android muncul saat menekan tombol volume fisik di WhatsApp, Setelan, dll. 100% dialihkan ke pil Dynamic Island.",
+                        isActive = isVolumeInterceptionActive,
+                        badgeType = RestartBadgeType.INSTANT,
+                        onToggle = { viewModel.toggleVolumeInterceptionRoot(context) }
                     )
                 }
 

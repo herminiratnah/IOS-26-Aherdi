@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">IOS 26 Aherdi</string>
+    <string name="accessibility_volume_service_desc">iOS Dynamic Island Volume Controller: Mencegah dialog volume bawaan Android muncul dan mengalihkannya ke Dynamic Island.</string>
 </resources>

@@ -9,6 +9,9 @@ import android.content.Intent
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
+import android.location.LocationManager
+import android.os.PowerManager
 import android.content.BroadcastReceiver
 import android.content.IntentFilter
 import android.provider.Settings
@@ -19,9 +22,12 @@ import android.media.AudioManager
 import android.media.AudioTrack
 import android.media.MediaPlayer
 import android.media.ToneGenerator
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.telephony.TelephonyManager
 import android.Manifest
 import androidx.core.content.ContextCompat
 import android.provider.CallLog
@@ -41,6 +47,10 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import androidx.compose.ui.graphics.Color
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.*
+import com.example.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -63,7 +73,23 @@ enum class DynamicIslandMode {
     MUSIC,
     TIMER,
     BATTERY,
-    VOLUME
+    VOLUME,
+    UNLOCK,
+    SILENT_MODE,
+    FACE_ID,
+    NETWORK,
+    ACCESSORY,
+    PRIVACY,
+    AIRDROP,
+    HOTSPOT,
+    AIRPLAY,
+    NAVIGATION,
+    VOICE_MEMO,
+    FOCUS,
+    FIND_MY,
+    SPORTS,
+    DELIVERY,
+    FLIGHT
 }
 
 data class InstalledAppItem(
@@ -83,8 +109,74 @@ data class DynamicIslandData(
     val icon: String = "",
     val accentColor: Long = 0xFF34C759,
     val packageName: String? = null,
-    val contentIntent: android.app.PendingIntent? = null
+    val contentIntent: android.app.PendingIntent? = null,
+    val isSilent: Boolean = false,
+    val isFaceIdSuccess: Boolean = false,
+    val faceIdContext: String = "Buka Kunci Layar",
+    val accessoryName: String = "AirPods Pro",
+    val batteryLeft: Int = 100,
+    val batteryRight: Int = 95,
+    val batteryCase: Int = 85,
+    val isCameraActive: Boolean = false,
+    val isMicActive: Boolean = false,
+    val privacyAppName: String = "Kamera",
+    val voipAppName: String = "WhatsApp",
+    val isIncomingCall: Boolean = false,
+    val callDuration: String = "00:00",
+    val airdropSender: String = "MacBook Pro M3",
+    val airdropFileName: String = "IMG_8821.HEIC",
+    val airdropProgress: Float = 0.72f,
+    val airdropCompleted: Boolean = false,
+    val hotspotDeviceCount: Int = 1,
+    val hotspotDeviceName: String = "iPad Pro M4",
+    val activeAirPlayDevice: String = "AirPods Pro",
+    val navTurnIcon: String = "turn_right",
+    val navInstruction: String = "Belok Kanan ke Jl. Sudirman",
+    val navDistance: String = "200 m",
+    val navEta: String = "14:35 · 12 min",
+    val voiceMemoDuration: String = "01:24",
+    val isVoiceMemoRecording: Boolean = false,
+    val focusModeName: String = "Do Not Disturb",
+    val findMyDeviceName: String = "Kunci Mobil (AirTag)",
+    val findMyDistance: String = "3.8 m",
+    val sportsHomeTeam: String = "Real Madrid",
+    val sportsAwayTeam: String = "Barcelona",
+    val sportsHomeScore: Int = 2,
+    val sportsAwayScore: Int = 1,
+    val sportsMatchTime: String = "78'",
+    val sportsLeague: String = "El Clásico · LaLiga",
+    val deliveryService: String = "Gojek",
+    val deliveryDriverName: String = "Pak Joko",
+    val deliveryVehiclePlate: String = "B 4521 SKZ",
+    val deliveryStatus: String = "Driver menuju lokasimu",
+    val deliveryEta: String = "5 mnt",
+    val flightCode: String = "GA 412",
+    val flightRoute: String = "CGK ✈ DPS",
+    val flightGate: String = "Gate 12B",
+    val flightStatus: String = "On Time",
+    val flightEta: String = "Tiba 16:45"
 )
+
+fun Drawable?.toBitmapSafe(targetSize: Int = 144): Bitmap? {
+    if (this == null) return null
+    return try {
+        if (this is BitmapDrawable && this.bitmap != null && !this.bitmap.isRecycled) {
+            this.bitmap
+        } else {
+            val width = if (intrinsicWidth > 0) intrinsicWidth.coerceAtMost(256) else targetSize
+            val height = if (intrinsicHeight > 0) intrinsicHeight.coerceAtMost(256) else targetSize
+            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            val oldBounds = copyBounds()
+            setBounds(0, 0, width, height)
+            draw(canvas)
+            setBounds(oldBounds)
+            bitmap
+        }
+    } catch (e: Throwable) {
+        null
+    }
+}
 
 class IOSViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -132,6 +224,41 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _networkType = MutableStateFlow("5G")
     val networkType: StateFlow<String> = _networkType.asStateFlow()
+
+    // Secondary Dynamic Island State (for Dual / Split Island Bubble)
+    private val _secondaryDynamicIsland = MutableStateFlow<DynamicIslandData?>(null)
+    val secondaryDynamicIsland: StateFlow<DynamicIslandData?> = _secondaryDynamicIsland.asStateFlow()
+
+    // Upgraded Status Bar Telemetry
+    private val _isBluetoothDeviceConnected = MutableStateFlow(false)
+    val isBluetoothDeviceConnected: StateFlow<Boolean> = _isBluetoothDeviceConnected.asStateFlow()
+
+    private val _isVpnActive = MutableStateFlow(false)
+    val isVpnActive: StateFlow<Boolean> = _isVpnActive.asStateFlow()
+
+    private val _isLocationActive = MutableStateFlow(false)
+    val isLocationActive: StateFlow<Boolean> = _isLocationActive.asStateFlow()
+
+    private val _isAlarmSet = MutableStateFlow(false)
+    val isAlarmSet: StateFlow<Boolean> = _isAlarmSet.asStateFlow()
+
+    private val _isLowPowerMode = MutableStateFlow(false)
+    val isLowPowerMode: StateFlow<Boolean> = _isLowPowerMode.asStateFlow()
+
+    private val _showBatteryPercentage = MutableStateFlow(true)
+    val showBatteryPercentage: StateFlow<Boolean> = _showBatteryPercentage.asStateFlow()
+
+    private val _networkSpeed = MutableStateFlow("0 KB/s")
+    val networkSpeed: StateFlow<String> = _networkSpeed.asStateFlow()
+
+    private val _showNetworkSpeed = MutableStateFlow(true)
+    val showNetworkSpeed: StateFlow<Boolean> = _showNetworkSpeed.asStateFlow()
+
+    private val _notchOffsetY = MutableStateFlow(0f)
+    val notchOffsetY: StateFlow<Float> = _notchOffsetY.asStateFlow()
+
+    private val _notchScale = MutableStateFlow(1.0f)
+    val notchScale: StateFlow<Float> = _notchScale.asStateFlow()
 
     // Real Contacts List with default initial contacts
     private val _contactsList = MutableStateFlow<List<ContactItem>>(
@@ -259,6 +386,30 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
     private val _isAssistiveTouchEnabled = MutableStateFlow(false)
     val isAssistiveTouchEnabled: StateFlow<Boolean> = _isAssistiveTouchEnabled.asStateFlow()
 
+    // iOS 18 Setup Wizard
+    private val _isSetupWizardOpen = MutableStateFlow(false)
+    val isSetupWizardOpen: StateFlow<Boolean> = _isSetupWizardOpen.asStateFlow()
+
+    // iOS 18 Icon Tint Style: "DEFAULT", "DARK", "TINTED"
+    private val _iconTintStyle = MutableStateFlow("DEFAULT")
+    val iconTintStyle: StateFlow<String> = _iconTintStyle.asStateFlow()
+
+    fun setIconTintStyle(style: String) {
+        _iconTintStyle.value = style
+        val app = getApplication<android.app.Application>()
+        IOSPersistenceManager.getPrefs(app).edit().putString("icon_tint_style", style).apply()
+    }
+
+    fun completeSetupWizard() {
+        _isSetupWizardOpen.value = false
+        val app = getApplication<android.app.Application>()
+        IOSPersistenceManager.getPrefs(app).edit().putBoolean("oobe_completed", true).apply()
+    }
+
+    fun openSetupWizard() {
+        _isSetupWizardOpen.value = true
+    }
+
     // Spotlight Search
     private val _isSpotlightOpen = MutableStateFlow(false)
     val isSpotlightOpen: StateFlow<Boolean> = _isSpotlightOpen.asStateFlow()
@@ -328,51 +479,31 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleAssistiveTouch() { _isAssistiveTouchEnabled.value = !_isAssistiveTouchEnabled.value }
     fun setAssistiveTouchEnabled(enabled: Boolean) { _isAssistiveTouchEnabled.value = enabled }
 
-    // Wallpaper Management
-    private val _currentWallpaperRes = MutableStateFlow(com.example.R.drawable.wallpaper_mountain_depth)
+    // Wallpaper Management - Separated Lock Screen vs Home Screen
+    private val _currentWallpaperRes = MutableStateFlow<Int>(com.example.R.drawable.wallpaper_alpine)
     val currentWallpaperRes: StateFlow<Int> = _currentWallpaperRes.asStateFlow()
+    val lockScreenWallpaperRes: StateFlow<Int> = _currentWallpaperRes.asStateFlow()
 
     private val _currentWallpaperName = MutableStateFlow("Alpine Mountain Peak")
     val currentWallpaperName: StateFlow<String> = _currentWallpaperName.asStateFlow()
+    val lockScreenWallpaperName: StateFlow<String> = _currentWallpaperName.asStateFlow()
 
     private val _currentWallpaperUri = MutableStateFlow<String?>(null)
     val currentWallpaperUri: StateFlow<String?> = _currentWallpaperUri.asStateFlow()
+    val lockScreenWallpaperUri: StateFlow<String?> = _currentWallpaperUri.asStateFlow()
 
-    // Notification Center Real Pipeline
-    private val _activeNotifications = MutableStateFlow<List<IOSNotificationItem>>(
-        listOf(
-            IOSNotificationItem(
-                id = "init_wa",
-                packageName = "com.whatsapp",
-                appName = "WhatsApp",
-                title = "Dimas",
-                message = "Bro, nanti jangan lupa ketemuan jam 7 ya!",
-                timestamp = "5m ago",
-                iconKey = "whatsapp",
-                accentColor = 0xFF25D366
-            ),
-            IOSNotificationItem(
-                id = "init_ig",
-                packageName = "com.instagram.android",
-                appName = "Instagram",
-                title = "Jessica",
-                message = "Liked your story and sent a message ✨",
-                timestamp = "18m ago",
-                iconKey = "instagram",
-                accentColor = 0xFFE1306C
-            ),
-            IOSNotificationItem(
-                id = "init_cal",
-                packageName = "com.apple.mobilecal",
-                appName = "Calendar",
-                title = "Upcoming Event",
-                message = "Design Review iOS 26 Pro at 10:00",
-                timestamp = "30m ago",
-                iconKey = "calendar",
-                accentColor = 0xFFFF3B30
-            )
-        )
-    )
+    // Home Screen specific Wallpaper
+    private val _homeScreenWallpaperRes = MutableStateFlow<Int>(com.example.R.drawable.wallpaper_alpine)
+    val homeScreenWallpaperRes: StateFlow<Int> = _homeScreenWallpaperRes.asStateFlow()
+
+    private val _homeScreenWallpaperName = MutableStateFlow("Alpine Mountain Peak")
+    val homeScreenWallpaperName: StateFlow<String> = _homeScreenWallpaperName.asStateFlow()
+
+    private val _homeScreenWallpaperUri = MutableStateFlow<String?>(null)
+    val homeScreenWallpaperUri: StateFlow<String?> = _homeScreenWallpaperUri.asStateFlow()
+
+    // Notification Center Real Pipeline (starts empty, populated strictly by real device notifications)
+    private val _activeNotifications = MutableStateFlow<List<IOSNotificationItem>>(emptyList())
     val activeNotifications: StateFlow<List<IOSNotificationItem>> = _activeNotifications.asStateFlow()
 
     fun dismissNotification(id: String) {
@@ -400,27 +531,137 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
     private val _isPasscodeEnabled = MutableStateFlow(true)
     val isPasscodeEnabled: StateFlow<Boolean> = _isPasscodeEnabled.asStateFlow()
 
+    private val _requestPasscodeTrigger = MutableStateFlow(0)
+    val requestPasscodeTrigger: StateFlow<Int> = _requestPasscodeTrigger.asStateFlow()
+
+    fun triggerHomeButtonOnLockScreen() {
+        if (_isDeviceLocked.value) {
+            if (_isPasscodeEnabled.value) {
+                _requestPasscodeTrigger.value += 1
+            } else {
+                unlockDevice()
+            }
+        }
+    }
+
     private val _userPasscode = MutableStateFlow("1234")
     val userPasscode: StateFlow<String> = _userPasscode.asStateFlow()
 
     private val _isFaceIdEnabled = MutableStateFlow(true)
     val isFaceIdEnabled: StateFlow<Boolean> = _isFaceIdEnabled.asStateFlow()
 
+    private val _userCountry = MutableStateFlow("Indonesia")
+    val userCountry: StateFlow<String> = _userCountry.asStateFlow()
+
+    fun setUserCountry(country: String) {
+        _userCountry.value = country
+        IOSPersistenceManager.getPrefs(getApplication()).edit().putString("user_country", country).apply()
+    }
+
+    // Dynamic Home Screen Apps
+    private val _homeScreenApps = MutableStateFlow<List<AppItem>>(emptyList())
+    val homeScreenApps: StateFlow<List<AppItem>> = _homeScreenApps.asStateFlow()
+
+    // Dynamic Dock Apps (Configurable & Customizable)
+    private val _dockApps = MutableStateFlow<List<AppItem>>(emptyList())
+    val dockApps: StateFlow<List<AppItem>> = _dockApps.asStateFlow()
+
+    // Dynamic Top Widgets (Weather, Calendar, Photos)
+    // Dynamic Widgets (Individual, Movable, Resizable iOS 26 Liquid Glass Widgets)
+    private val _widget1Type = MutableStateFlow("WEATHER")
+    val widget1Type: StateFlow<String> = _widget1Type.asStateFlow()
+    private val _widget1Size = MutableStateFlow("MEDIUM") // "SMALL" (2x2), "MEDIUM" (4x2), "COMPACT" (2x1), "LARGE" (4x4)
+    val widget1Size: StateFlow<String> = _widget1Size.asStateFlow()
+    private val _widget1Row = MutableStateFlow(0) // Row position (0..5)
+    val widget1Row: StateFlow<Int> = _widget1Row.asStateFlow()
+    private val _widget1Align = MutableStateFlow("LEFT") // "LEFT" or "RIGHT"
+    val widget1Align: StateFlow<String> = _widget1Align.asStateFlow()
+    private val _widget1Enabled = MutableStateFlow(true)
+    val widget1Enabled: StateFlow<Boolean> = _widget1Enabled.asStateFlow()
+
+    private val _widget2Type = MutableStateFlow("CALENDAR")
+    val widget2Type: StateFlow<String> = _widget2Type.asStateFlow()
+    private val _widget2Size = MutableStateFlow("SMALL")
+    val widget2Size: StateFlow<String> = _widget2Size.asStateFlow()
+    private val _widget2Row = MutableStateFlow(1)
+    val widget2Row: StateFlow<Int> = _widget2Row.asStateFlow()
+    private val _widget2Align = MutableStateFlow("LEFT")
+    val widget2Align: StateFlow<String> = _widget2Align.asStateFlow()
+    private val _widget2Enabled = MutableStateFlow(true) // Enabled by default on Row 1 (2x2 Calendar with 4 apps on right!)
+    val widget2Enabled: StateFlow<Boolean> = _widget2Enabled.asStateFlow()
+
+    // Widget 3: WhatsApp Widget (Customizable Size & Drag & Drop)
+    private val _widget3Type = MutableStateFlow("WHATSAPP")
+    val widget3Type: StateFlow<String> = _widget3Type.asStateFlow()
+    private val _widget3Size = MutableStateFlow("MEDIUM")
+    val widget3Size: StateFlow<String> = _widget3Size.asStateFlow()
+    private val _widget3Row = MutableStateFlow(2) // Row 2
+    val widget3Row: StateFlow<Int> = _widget3Row.asStateFlow()
+    private val _widget3Align = MutableStateFlow("LEFT")
+    val widget3Align: StateFlow<String> = _widget3Align.asStateFlow()
+    private val _widget3Enabled = MutableStateFlow(false)
+    val widget3Enabled: StateFlow<Boolean> = _widget3Enabled.asStateFlow()
+
+    // Widget 4: Additional dynamic widget slot
+    private val _widget4Type = MutableStateFlow("CALENDAR")
+    val widget4Type: StateFlow<String> = _widget4Type.asStateFlow()
+    private val _widget4Size = MutableStateFlow("SMALL")
+    val widget4Size: StateFlow<String> = _widget4Size.asStateFlow()
+    private val _widget4Row = MutableStateFlow(2)
+    val widget4Row: StateFlow<Int> = _widget4Row.asStateFlow()
+    private val _widget4Align = MutableStateFlow("LEFT")
+    val widget4Align: StateFlow<String> = _widget4Align.asStateFlow()
+    private val _widget4Enabled = MutableStateFlow(false)
+    val widget4Enabled: StateFlow<Boolean> = _widget4Enabled.asStateFlow()
+
+    // Widget 5: Additional dynamic widget slot
+    private val _widget5Type = MutableStateFlow("BATTERY")
+    val widget5Type: StateFlow<String> = _widget5Type.asStateFlow()
+    private val _widget5Size = MutableStateFlow("SMALL")
+    val widget5Size: StateFlow<String> = _widget5Size.asStateFlow()
+    private val _widget5Row = MutableStateFlow(3)
+    val widget5Row: StateFlow<Int> = _widget5Row.asStateFlow()
+    private val _widget5Align = MutableStateFlow("RIGHT")
+    val widget5Align: StateFlow<String> = _widget5Align.asStateFlow()
+    private val _widget5Enabled = MutableStateFlow(false)
+    val widget5Enabled: StateFlow<Boolean> = _widget5Enabled.asStateFlow()
+
+    // Widget 6: Additional dynamic widget slot
+    private val _widget6Type = MutableStateFlow("CLOCK")
+    val widget6Type: StateFlow<String> = _widget6Type.asStateFlow()
+    private val _widget6Size = MutableStateFlow("SMALL")
+    val widget6Size: StateFlow<String> = _widget6Size.asStateFlow()
+    private val _widget6Row = MutableStateFlow(4)
+    val widget6Row: StateFlow<Int> = _widget6Row.asStateFlow()
+    private val _widget6Align = MutableStateFlow("LEFT")
+    val widget6Align: StateFlow<String> = _widget6Align.asStateFlow()
+    private val _widget6Enabled = MutableStateFlow(false)
+    val widget6Enabled: StateFlow<Boolean> = _widget6Enabled.asStateFlow()
+
+    private val _leftWidgetType = MutableStateFlow("WEATHER")
+    val leftWidgetType: StateFlow<String> = _leftWidgetType.asStateFlow()
+
+    private val _rightWidgetType = MutableStateFlow("PHOTOS")
+    val rightWidgetType: StateFlow<String> = _rightWidgetType.asStateFlow()
+
+    // Dynamic Widget Row Position (Legacy / Pair mode)
+    private val _widgetRowPosition = MutableStateFlow(0)
+    val widgetRowPosition: StateFlow<Int> = _widgetRowPosition.asStateFlow()
+
     // Real Wi-Fi Network List
-    private val _availableWifiList = MutableStateFlow<List<Pair<String, Boolean>>>(
-        listOf(
-            Pair("Home_Fast_WiFi", true),
-            Pair("Apple_Park_5G", true),
-            Pair("CoffeeShop_Guest", true),
-            Pair("Office_HighSpeed", true),
-            Pair("Public_Free_WiFi", false)
-        )
-    )
+    private val _availableWifiList = MutableStateFlow<List<Pair<String, Boolean>>>(emptyList())
     val availableWifiList: StateFlow<List<Pair<String, Boolean>>> = _availableWifiList.asStateFlow()
     val scannedWifiList: StateFlow<List<Pair<String, Boolean>>> get() = availableWifiList
 
-    private val _currentWifiSsid = MutableStateFlow("Home_Fast_WiFi")
+    private val _currentWifiSsid = MutableStateFlow("")
     val currentWifiSsid: StateFlow<String> = _currentWifiSsid.asStateFlow()
+
+    private val _isWifiScanning = MutableStateFlow(false)
+    val isWifiScanning: StateFlow<Boolean> = _isWifiScanning.asStateFlow()
+
+    // Real Cellular State
+    private val _cellularCarrierName = MutableStateFlow("Cellular")
+    val cellularCarrierName: StateFlow<String> = _cellularCarrierName.asStateFlow()
 
     // Real Bluetooth State
     private var bluetoothReceiver: BroadcastReceiver? = null
@@ -438,25 +679,16 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
 
     // Music Player Engine
     private var mediaPlayer: MediaPlayer? = null
-    private val _musicList = MutableStateFlow<List<SongItem>>(
-        listOf(
-            SongItem("1", "Midnight City", "M83", "Hurry Up, We're Dreaming", 243000L, null, 0xFF5856D6, 0xFFFF2D55),
-            SongItem("2", "Get Lucky", "Daft Punk ft. Pharrell", "Random Access Memories", 248000L, null, 0xFFFF9500, 0xFFFF2D55),
-            SongItem("3", "Starboy", "The Weeknd ft. Daft Punk", "Starboy", 230000L, null, 0xFFFF3B30, 0xFF5856D6),
-            SongItem("4", "Blinding Lights", "The Weeknd", "After Hours", 200000L, null, 0xFF34C759, 0xFF007AFF),
-            SongItem("5", "Stay", "The Kid LAROI & Justin Bieber", "F*CK LOVE 3", 141000L, null, 0xFF007AFF, 0xFF5856D6),
-            SongItem("6", "As It Was", "Harry Styles", "Harry's House", 167000L, null, 0xFFAF52DE, 0xFFFF2D55)
-        )
-    )
+    private val _musicList = MutableStateFlow<List<SongItem>>(emptyList())
     val musicList: StateFlow<List<SongItem>> = _musicList.asStateFlow()
 
-    private val _currentSong = MutableStateFlow<SongItem?>(_musicList.value.first())
+    private val _currentSong = MutableStateFlow<SongItem?>(null)
     val currentSong: StateFlow<SongItem?> = _currentSong.asStateFlow()
 
-    private val _musicProgress = MutableStateFlow(0.25f)
+    private val _musicProgress = MutableStateFlow(0f)
     val musicProgress: StateFlow<Float> = _musicProgress.asStateFlow()
 
-    private val _musicCurrentTimeStr = MutableStateFlow("1:01")
+    private val _musicCurrentTimeStr = MutableStateFlow("0:00")
     val musicCurrentTimeStr: StateFlow<String> = _musicCurrentTimeStr.asStateFlow()
 
     private val _musicDurationStr = MutableStateFlow("4:03")
@@ -565,18 +797,10 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
     val activeThreadId: StateFlow<String?> = _activeThreadId.asStateFlow()
 
     // Notes State
-    private val _notes = MutableStateFlow<List<NoteItem>>(
-        listOf(
-            NoteItem("1", "Ide Projek", "Buat aplikasi sederhana untuk emulator iOS 26 di Android dengan native feel, dynamic island, dan root support!", "Today"),
-            NoteItem("2", "Daftar Belanja", "Telur, susu, roti, buah, kopi arabika, keju cheddar", "Yesterday"),
-            NoteItem("3", "Catatan Perjalanan", "Bandung – 12 Juli 2025\nHotel di Dago, sarapan kupat tahu, cafe hopping di Braga.", "Monday"),
-            NoteItem("4", "Rencana Ke Depan", "1. Upgrade skill Android Kotlin Compose\n2. Bikin portofolio mobile developer\n3. Traveling ke Bali", "Sunday"),
-            NoteItem("5", "Quotes Favorit", "\"Hal kecil yang konsisten lebih kuat daripada hal besar yang cuma sekali-kali.\"", "Saturday")
-        )
-    )
+    private val _notes = MutableStateFlow<List<NoteItem>>(emptyList())
     val notes: StateFlow<List<NoteItem>> = _notes.asStateFlow()
 
-    private val _activeNoteId = MutableStateFlow<String?>("1")
+    private val _activeNoteId = MutableStateFlow<String?>(null)
     val activeNoteId: StateFlow<String?> = _activeNoteId.asStateFlow()
 
     // Calendar Events
@@ -623,9 +847,9 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
     private val _photoItems = MutableStateFlow<List<PhotoItem>>(
         listOf(
             PhotoItem("1", "Alpine Valley Lake", "15 Jul", com.example.R.drawable.photo_widget_nature),
-            PhotoItem("2", "Impossible Architecture", "14 Jul", com.example.R.drawable.monument_valley_art),
-            PhotoItem("3", "iOS 26 Ambient Glow", "12 Jul", com.example.R.drawable.ios26_wallpaper),
-            PhotoItem("4", "iPhone SE 2 Studio", "10 Jul", com.example.R.drawable.ios_launcher_icon)
+            PhotoItem("2", "Crystal Glass Sky", "14 Jul", com.example.R.drawable.wp_crystal_glass),
+            PhotoItem("3", "Twilight Clouds", "12 Jul", com.example.R.drawable.wp_twilight_clouds),
+            PhotoItem("4", "Golden Dunes", "10 Jul", com.example.R.drawable.wp_golden_dunes)
         )
     )
     val photoItems: StateFlow<List<PhotoItem>> = _photoItems.asStateFlow()
@@ -656,6 +880,9 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isImmersiveLocked = MutableStateFlow(false)
     val isImmersiveLocked: StateFlow<Boolean> = _isImmersiveLocked.asStateFlow()
+
+    private val _isVolumeInterceptionActive = MutableStateFlow(false)
+    val isVolumeInterceptionActive: StateFlow<Boolean> = _isVolumeInterceptionActive.asStateFlow()
 
     private val _isSystemUIDisabled = MutableStateFlow(false)
     val isSystemUIDisabled: StateFlow<Boolean> = _isSystemUIDisabled.asStateFlow()
@@ -695,15 +922,17 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
             _alarms.value = IOSPersistenceManager.loadAlarms(app)
             _reminders.value = IOSPersistenceManager.loadReminders(app)
             _notes.value = IOSPersistenceManager.loadNotes(app)
-            val (savedRes, savedName, savedUri) = IOSPersistenceManager.loadWallpaper(app)
+            val (savedRes, savedName, savedUri) = IOSPersistenceManager.loadLockScreenWallpaper(app)
             _currentWallpaperRes.value = savedRes
             _currentWallpaperName.value = savedName
             _currentWallpaperUri.value = savedUri
-            val (savedDepth, savedTheme) = IOSPersistenceManager.loadDepthConfig(app)
-            _lockScreenConfig.value = _lockScreenConfig.value.copy(
-                depthEffectEnabled = savedDepth,
-                depthTheme = savedTheme
-            )
+
+            val (savedHomeRes, savedHomeName, savedHomeUri) = IOSPersistenceManager.loadHomeScreenWallpaper(app)
+            _homeScreenWallpaperRes.value = savedHomeRes
+            _homeScreenWallpaperName.value = savedHomeName
+            _homeScreenWallpaperUri.value = savedHomeUri
+
+            _lockScreenConfig.value = IOSPersistenceManager.loadFullLockScreenConfig(app)
             initBluetoothState(app)
 
             // Load iRoot persistent states
@@ -717,6 +946,12 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
             _retinaDpi.value = IOSPersistenceManager.loadRootInt(app, "retina_dpi", 240)
             _spoofedModel.value = IOSPersistenceManager.loadRootString(app, "spoofed_model", "iPhone SE (2nd gen) / iOS 26")
             _isTopDisplayInsetActive.value = IOSPersistenceManager.loadRootBoolean(app, "top_inset", false)
+            _isVolumeInterceptionActive.value = RootExecutor.isVolumeInterceptionEnabled(app)
+
+            // Initial Real Network Scans (Wi-Fi, Bluetooth, Cellular)
+            scanWifiNetworks(app)
+            initBluetoothState(app)
+            refreshCellularInfo(app)
 
             // Auto-fetch real-time weather for Bandung
             fetchLiveWeather("Bandung")
@@ -733,14 +968,35 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
             _backTapDoubleAction.value = IOSPersistenceManager.loadBackTapDoubleAction(app)
             _backTapTripleAction.value = IOSPersistenceManager.loadBackTapTripleAction(app)
 
+            initHomeScreenApps(app)
+            initDockApps(app)
+            initWidgetTypes(app)
+            _userCountry.value = IOSPersistenceManager.getPrefs(app).getString("user_country", "Indonesia") ?: "Indonesia"
+
+            val oobeCompleted = IOSPersistenceManager.getPrefs(app).getBoolean("oobe_completed", false)
+            _isSetupWizardOpen.value = !oobeCompleted
+            _iconTintStyle.value = IOSPersistenceManager.getPrefs(app).getString("icon_tint_style", "DEFAULT") ?: "DEFAULT"
+
             // Setup OverlayBridge callbacks for cross-app control
             OverlayBridge.onTogglePlayPause = { toggleMusicPlay() }
             OverlayBridge.onNextSong = { skipNextSong() }
             OverlayBridge.onPrevSong = { skipPreviousSong() }
             OverlayBridge.onEndCall = { endCall(null) }
+            OverlayBridge.onAnswerCall = { answerIncomingCall(getApplication()) }
+            OverlayBridge.onDeclineCall = { rejectIncomingCall(getApplication()) }
             OverlayBridge.onToggleMute = { toggleMuteCall() }
             OverlayBridge.onToggleSpeaker = { toggleSpeakerCall() }
+            OverlayBridge.onSeekMusic = { frac -> seekMusicTo(frac) }
+            OverlayBridge.onTimerPauseResume = { toggleTimerPauseResume() }
+            OverlayBridge.onTimerCancel = { stopTimer() }
+            OverlayBridge.onVoiceMemoStop = { dismissDynamicIsland() }
             OverlayBridge.onDismissDynamicIsland = { dismissDynamicIsland() }
+            OverlayBridge.onSecondaryIslandClick = { onSecondaryIslandClicked() }
+            OverlayBridge.onDoubleTapStatusBar = { lockDevice() }
+
+            _showBatteryPercentage.value = IOSPersistenceManager.getPrefs(app).getBoolean("show_battery_pct", true)
+            _notchOffsetY.value = IOSPersistenceManager.getPrefs(app).getFloat("notch_offset_y", 0f)
+            _notchScale.value = IOSPersistenceManager.getPrefs(app).getFloat("notch_scale", 1.0f)
 
             // Mirror Dynamic Island state changes across all apps
             viewModelScope.launch {
@@ -748,6 +1004,51 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
                     OverlayBridge.dynamicIslandData.value = islandState
                 }
             }
+            viewModelScope.launch {
+                _secondaryDynamicIsland.collect { sec ->
+                    OverlayBridge.secondaryIslandData.value = sec
+                }
+            }
+            viewModelScope.launch {
+                _isBluetoothDeviceConnected.collect { OverlayBridge.isBluetoothConnected.value = it }
+            }
+            viewModelScope.launch {
+                _isVpnActive.collect { OverlayBridge.isVpnConnected.value = it }
+            }
+            viewModelScope.launch {
+                _isLocationActive.collect { OverlayBridge.isLocationActive.value = it }
+            }
+            viewModelScope.launch {
+                _isAlarmSet.collect { OverlayBridge.isAlarmSet.value = it }
+            }
+            viewModelScope.launch {
+                _isLowPowerMode.collect { OverlayBridge.isLowPowerMode.value = it }
+            }
+            viewModelScope.launch {
+                _showBatteryPercentage.collect { OverlayBridge.showBatteryPercentage.value = it }
+            }
+            _showNetworkSpeed.value = IOSPersistenceManager.getPrefs(app).getBoolean("show_network_speed", true)
+            viewModelScope.launch {
+                _showNetworkSpeed.collect { OverlayBridge.showNetworkSpeed.value = it }
+            }
+            viewModelScope.launch {
+                _networkSpeed.collect { OverlayBridge.networkSpeed.value = it }
+            }
+            viewModelScope.launch {
+                _notchOffsetY.collect { OverlayBridge.notchOffsetY.value = it }
+            }
+            viewModelScope.launch {
+                _notchScale.collect { OverlayBridge.notchScale.value = it }
+            }
+            viewModelScope.launch {
+                _isCallMuted.collect { OverlayBridge.isCallMuted.value = it }
+            }
+            viewModelScope.launch {
+                _isCallSpeaker.collect { OverlayBridge.isCallSpeaker.value = it }
+            }
+
+            startNetworkTrafficMonitor()
+            refreshSystemTelemetry(app)
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -869,6 +1170,46 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
     // ================= ACTIONS =================
 
     fun openApp(appId: AppId) {
+        val app = getApplication<Application>()
+        if (appId == AppId.PHONE) {
+            try {
+                val intent = Intent(Intent.ACTION_DIAL).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                app.startActivity(intent)
+                return
+            } catch (_: Exception) {}
+        } else if (appId == AppId.MESSAGES) {
+            try {
+                val intent = Intent(Intent.ACTION_MAIN).apply {
+                    addCategory(Intent.CATEGORY_APP_MESSAGING)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                app.startActivity(intent)
+                return
+            } catch (_: Exception) {
+                try {
+                    val smsIntent = Intent(Intent.ACTION_VIEW, Uri.parse("sms:")).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    app.startActivity(smsIntent)
+                    return
+                } catch (_: Exception) {}
+            }
+        } else if (appId == AppId.APP_STORE) {
+            try {
+                val storeIntent = app.packageManager.getLaunchIntentForPackage("com.aurora.store")
+                    ?: app.packageManager.getLaunchIntentForPackage("org.fdroid.fdroid")
+                    ?: app.packageManager.getLaunchIntentForPackage("com.android.vending")
+                    ?: Intent(Intent.ACTION_VIEW, Uri.parse("market://search?q=")).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                storeIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                app.startActivity(storeIntent)
+                return
+            } catch (_: Exception) {}
+        }
+
         _currentApp.value = appId
         _isControlCenterOpen.value = false
         _isNotificationCenterOpen.value = false
@@ -935,6 +1276,13 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun openControlCenter() {
+        _isControlCenterOpen.value = true
+        _isNotificationCenterOpen.value = false
+        _isAppSwitcherOpen.value = false
+        _isSpotlightOpen.value = false
+    }
+
     fun closeControlCenter() {
         _isControlCenterOpen.value = false
     }
@@ -944,6 +1292,13 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
         if (_isNotificationCenterOpen.value) {
             _isControlCenterOpen.value = false
         }
+    }
+
+    fun openNotificationCenter() {
+        _isNotificationCenterOpen.value = true
+        _isControlCenterOpen.value = false
+        _isAppSwitcherOpen.value = false
+        _isSpotlightOpen.value = false
     }
 
     fun closeNotificationCenter() {
@@ -964,7 +1319,7 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
         _lockScreenConfig.value = updated
         try {
             val app = getApplication<Application>()
-            IOSPersistenceManager.saveDepthConfig(app, updated.depthEffectEnabled, updated.depthTheme)
+            IOSPersistenceManager.saveFullLockScreenConfig(app, updated)
         } catch (ignored: Exception) {}
     }
 
@@ -998,6 +1353,9 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
     fun dismissDynamicIsland() {
         dynamicIslandJob?.cancel()
         _dynamicIsland.value = DynamicIslandData(mode = DynamicIslandMode.COMPACT)
+        _isInCall.value = false
+        OverlayBridge.isInCall.value = false
+        OverlayBridge.dynamicIslandData.value = DynamicIslandData(mode = DynamicIslandMode.COMPACT)
     }
 
     fun showDynamicIslandBattery(level: Int, isCharging: Boolean) {
@@ -1018,6 +1376,10 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun showDynamicIslandVolume(volumePercent: Int) {
+        // If in call (cellular or VoIP/WhatsApp), DO NOT override call animation with Volume!
+        if (_isInCall.value || _dynamicIsland.value.mode == DynamicIslandMode.CALL) {
+            return
+        }
         dynamicIslandJob?.cancel()
         _dynamicIsland.value = DynamicIslandData(
             mode = DynamicIslandMode.VOLUME,
@@ -1032,6 +1394,295 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
                 _dynamicIsland.value = DynamicIslandData(mode = DynamicIslandMode.COMPACT)
             }
         }
+    }
+
+    fun showDynamicIslandRinger(isSilent: Boolean) {
+        dynamicIslandJob?.cancel()
+        _dynamicIsland.value = DynamicIslandData(
+            mode = DynamicIslandMode.SILENT_MODE,
+            title = if (isSilent) "Mode Hening" else "Dering",
+            subtitle = if (isSilent) "Hening Aktif" else "Suara Aktif",
+            icon = if (isSilent) "silent" else "bell",
+            accentColor = if (isSilent) 0xFFFF3B30 else 0xFF34C759,
+            isSilent = isSilent
+        )
+        dynamicIslandJob = viewModelScope.launch {
+            delay(3000)
+            if (_dynamicIsland.value.mode == DynamicIslandMode.SILENT_MODE) {
+                _dynamicIsland.value = DynamicIslandData(mode = DynamicIslandMode.COMPACT)
+            }
+        }
+    }
+
+    fun showDynamicIslandFaceId(context: String = "Buka Kunci Layar") {
+        dynamicIslandJob?.cancel()
+        _dynamicIsland.value = DynamicIslandData(
+            mode = DynamicIslandMode.FACE_ID,
+            title = "Face ID",
+            subtitle = context,
+            icon = "faceid",
+            accentColor = 0xFF007AFF,
+            faceIdContext = context,
+            isFaceIdSuccess = false
+        )
+        dynamicIslandJob = viewModelScope.launch {
+            delay(800)
+            if (_dynamicIsland.value.mode == DynamicIslandMode.FACE_ID) {
+                _dynamicIsland.value = _dynamicIsland.value.copy(isFaceIdSuccess = true)
+            }
+            delay(1200)
+            if (_dynamicIsland.value.mode == DynamicIslandMode.FACE_ID) {
+                _dynamicIsland.value = DynamicIslandData(mode = DynamicIslandMode.COMPACT)
+            }
+        }
+    }
+
+    fun showDynamicIslandNetwork(type: String, status: String) {
+        dynamicIslandJob?.cancel()
+        _dynamicIsland.value = DynamicIslandData(
+            mode = DynamicIslandMode.NETWORK,
+            title = type,
+            subtitle = status,
+            icon = type.lowercase(),
+            accentColor = 0xFF007AFF
+        )
+        dynamicIslandJob = viewModelScope.launch {
+            delay(2800)
+            if (_dynamicIsland.value.mode == DynamicIslandMode.NETWORK) {
+                _dynamicIsland.value = DynamicIslandData(mode = DynamicIslandMode.COMPACT)
+            }
+        }
+    }
+
+    fun showDynamicIslandAccessory(name: String = "AirPods Pro", left: Int = 100, right: Int = 95, case: Int = 85) {
+        dynamicIslandJob?.cancel()
+        _dynamicIsland.value = DynamicIslandData(
+            mode = DynamicIslandMode.ACCESSORY,
+            title = name,
+            subtitle = "Terhubung",
+            icon = "headphones",
+            accentColor = 0xFF34C759,
+            accessoryName = name,
+            batteryLeft = left,
+            batteryRight = right,
+            batteryCase = case
+        )
+        dynamicIslandJob = viewModelScope.launch {
+            delay(4000)
+            if (_dynamicIsland.value.mode == DynamicIslandMode.ACCESSORY) {
+                _dynamicIsland.value = DynamicIslandData(mode = DynamicIslandMode.COMPACT)
+            }
+        }
+    }
+
+    fun showDynamicIslandPrivacy(isCamera: Boolean, isMic: Boolean, appName: String = "Kamera") {
+        dynamicIslandJob?.cancel()
+        _dynamicIsland.value = DynamicIslandData(
+            mode = DynamicIslandMode.PRIVACY,
+            title = if (isCamera) "Kamera Aktif" else "Mikrofon Aktif",
+            subtitle = "Digunakan oleh $appName",
+            icon = if (isCamera) "camera" else "mic",
+            accentColor = if (isCamera) 0xFF34C759 else 0xFFFF9500,
+            isCameraActive = isCamera,
+            isMicActive = isMic,
+            privacyAppName = appName
+        )
+        dynamicIslandJob = viewModelScope.launch {
+            delay(3500)
+            if (_dynamicIsland.value.mode == DynamicIslandMode.PRIVACY) {
+                _dynamicIsland.value = DynamicIslandData(mode = DynamicIslandMode.COMPACT)
+            }
+        }
+    }
+
+    fun showDynamicIslandVoipCall(appName: String = "WhatsApp", callerName: String = "Dimas Pratama", isIncoming: Boolean = true) {
+        dynamicIslandJob?.cancel()
+        _isInCall.value = true
+        _callContactName.value = callerName
+        val voipData = DynamicIslandData(
+            mode = DynamicIslandMode.CALL,
+            title = callerName,
+            subtitle = if (isIncoming) "$appName Audio..." else "00:01",
+            icon = if (appName.contains("whatsapp", ignoreCase = true)) "whatsapp" else "phone",
+            accentColor = if (appName.contains("WhatsApp", ignoreCase = true)) 0xFF25D366 else 0xFF007AFF,
+            voipAppName = appName,
+            isIncomingCall = isIncoming
+        )
+        _dynamicIsland.value = voipData
+        OverlayBridge.isInCall.value = true
+        OverlayBridge.callName.value = callerName
+        OverlayBridge.dynamicIslandData.value = voipData
+    }
+
+    fun showDynamicIslandAirDrop(sender: String = "MacBook Pro M3", fileName: String = "IMG_8821.HEIC") {
+        dynamicIslandJob?.cancel()
+        _dynamicIsland.value = DynamicIslandData(
+            mode = DynamicIslandMode.AIRDROP,
+            title = "AirDrop · $sender",
+            subtitle = fileName,
+            icon = "airdrop",
+            accentColor = 0xFF007AFF,
+            airdropSender = sender,
+            airdropFileName = fileName,
+            airdropProgress = 0.35f,
+            airdropCompleted = false
+        )
+        dynamicIslandJob = viewModelScope.launch {
+            delay(1000)
+            if (_dynamicIsland.value.mode == DynamicIslandMode.AIRDROP) {
+                _dynamicIsland.value = _dynamicIsland.value.copy(airdropProgress = 0.85f)
+            }
+            delay(900)
+            if (_dynamicIsland.value.mode == DynamicIslandMode.AIRDROP) {
+                _dynamicIsland.value = _dynamicIsland.value.copy(airdropProgress = 1f, airdropCompleted = true, subtitle = "Selesai")
+            }
+            delay(2000)
+            if (_dynamicIsland.value.mode == DynamicIslandMode.AIRDROP) {
+                _dynamicIsland.value = DynamicIslandData(mode = DynamicIslandMode.COMPACT)
+            }
+        }
+    }
+
+    fun showDynamicIslandHotspot(count: Int = 1, deviceName: String = "iPad Pro M4") {
+        dynamicIslandJob?.cancel()
+        _dynamicIsland.value = DynamicIslandData(
+            mode = DynamicIslandMode.HOTSPOT,
+            title = "Hotspot Pribadi",
+            subtitle = "$count Perangkat ($deviceName)",
+            icon = "link",
+            accentColor = 0xFF007AFF,
+            hotspotDeviceCount = count,
+            hotspotDeviceName = deviceName
+        )
+        dynamicIslandJob = viewModelScope.launch {
+            delay(3500)
+            if (_dynamicIsland.value.mode == DynamicIslandMode.HOTSPOT) {
+                _dynamicIsland.value = DynamicIslandData(mode = DynamicIslandMode.COMPACT)
+            }
+        }
+    }
+
+    fun showDynamicIslandAirPlay(activeDevice: String = "AirPods Pro") {
+        dynamicIslandJob?.cancel()
+        _dynamicIsland.value = DynamicIslandData(
+            mode = DynamicIslandMode.AIRPLAY,
+            title = "Output Audio (AirPlay)",
+            subtitle = "Terhubung ke $activeDevice",
+            icon = "airplay",
+            accentColor = 0xFF007AFF,
+            activeAirPlayDevice = activeDevice
+        )
+    }
+
+    fun switchAirPlayDevice(device: String) {
+        _dynamicIsland.value = _dynamicIsland.value.copy(activeAirPlayDevice = device, subtitle = "Terhubung ke $device")
+        showDynamicIslandNotification("AirPlay", "Output dialihkan ke $device", "airplay", 0xFF007AFF)
+    }
+
+    fun showDynamicIslandNavigation(turnIcon: String = "turn_right", instruction: String = "Belok Kanan ke Jl. Sudirman", distance: String = "200 m", eta: String = "14:35 · 12 min") {
+        dynamicIslandJob?.cancel()
+        _dynamicIsland.value = DynamicIslandData(
+            mode = DynamicIslandMode.NAVIGATION,
+            title = instruction,
+            subtitle = "$distance · $eta",
+            icon = "navigation",
+            accentColor = 0xFF34C759,
+            navTurnIcon = turnIcon,
+            navInstruction = instruction,
+            navDistance = distance,
+            navEta = eta
+        )
+    }
+
+    fun showDynamicIslandVoiceMemo(isRecording: Boolean = true, duration: String = "01:24") {
+        dynamicIslandJob?.cancel()
+        _dynamicIsland.value = DynamicIslandData(
+            mode = DynamicIslandMode.VOICE_MEMO,
+            title = if (isRecording) "Perekam Suara" else "Perekaman Selesai",
+            subtitle = duration,
+            icon = "mic",
+            accentColor = 0xFFFF2D55,
+            voiceMemoDuration = duration,
+            isVoiceMemoRecording = isRecording
+        )
+    }
+
+    fun showDynamicIslandFocus(modeName: String = "Do Not Disturb", icon: String = "moon") {
+        dynamicIslandJob?.cancel()
+        _dynamicIsland.value = DynamicIslandData(
+            mode = DynamicIslandMode.FOCUS,
+            title = modeName,
+            subtitle = "Mode Fokus Aktif",
+            icon = icon,
+            accentColor = 0xFF5856D6,
+            focusModeName = modeName
+        )
+        dynamicIslandJob = viewModelScope.launch {
+            delay(3000)
+            if (_dynamicIsland.value.mode == DynamicIslandMode.FOCUS) {
+                _dynamicIsland.value = DynamicIslandData(mode = DynamicIslandMode.COMPACT)
+            }
+        }
+    }
+
+    fun showDynamicIslandFindMy(device: String = "Kunci Mobil (AirTag)", distance: String = "3.8 m") {
+        dynamicIslandJob?.cancel()
+        _dynamicIsland.value = DynamicIslandData(
+            mode = DynamicIslandMode.FIND_MY,
+            title = device,
+            subtitle = "$distance di depan Anda",
+            icon = "findmy",
+            accentColor = 0xFF34C759,
+            findMyDeviceName = device,
+            findMyDistance = distance
+        )
+    }
+
+    fun showDynamicIslandSports(home: String = "Real Madrid", away: String = "Barcelona", homeScore: Int = 2, awayScore: Int = 1, time: String = "78'") {
+        dynamicIslandJob?.cancel()
+        _dynamicIsland.value = DynamicIslandData(
+            mode = DynamicIslandMode.SPORTS,
+            title = "$home $homeScore - $awayScore $away",
+            subtitle = "LaLiga · $time",
+            icon = "sports",
+            accentColor = 0xFFFF9500,
+            sportsHomeTeam = home,
+            sportsAwayTeam = away,
+            sportsHomeScore = homeScore,
+            sportsAwayScore = awayScore,
+            sportsMatchTime = time
+        )
+    }
+
+    fun showDynamicIslandDelivery(service: String = "Gojek", driver: String = "Pak Joko", plate: String = "B 4521 SKZ", status: String = "Driver menuju lokasimu", eta: String = "5 mnt") {
+        dynamicIslandJob?.cancel()
+        _dynamicIsland.value = DynamicIslandData(
+            mode = DynamicIslandMode.DELIVERY,
+            title = "$service · $eta",
+            subtitle = "$driver ($plate) · $status",
+            icon = "delivery",
+            accentColor = 0xFF00AA13,
+            deliveryService = service,
+            deliveryDriverName = driver,
+            deliveryVehiclePlate = plate,
+            deliveryStatus = status,
+            deliveryEta = eta
+        )
+    }
+
+    fun showDynamicIslandFlight(code: String = "GA 412", route: String = "CGK ✈ DPS", gate: String = "Gate 12B", status: String = "On Time") {
+        dynamicIslandJob?.cancel()
+        _dynamicIsland.value = DynamicIslandData(
+            mode = DynamicIslandMode.FLIGHT,
+            title = "$code · $route",
+            subtitle = "$gate · $status (Tiba 16:45)",
+            icon = "flight",
+            accentColor = 0xFF007AFF,
+            flightCode = code,
+            flightRoute = route,
+            flightGate = gate,
+            flightStatus = status
+        )
     }
 
     // Phone Calls (In-App Calling)
@@ -1121,6 +1772,7 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
         if (_dynamicIsland.value.mode == DynamicIslandMode.CALL) {
             _dynamicIsland.value = DynamicIslandData(mode = DynamicIslandMode.COMPACT)
         }
+        OverlayBridge.dynamicIslandData.value = DynamicIslandData(mode = DynamicIslandMode.COMPACT)
     }
 
     fun toggleMuteCall() {
@@ -1391,29 +2043,41 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
         _stopwatchLaps.value = listOf(lapStr) + _stopwatchLaps.value
     }
 
-    // Countdown Timer
+    // Countdown Timer with Dual Island support
     fun startTimer(seconds: Int) {
         countdownTimerJob?.cancel()
         _timerRemainingSeconds.value = seconds
         _isTimerRunning.value = true
-        _dynamicIsland.value = DynamicIslandData(
+
+        val timerData = DynamicIslandData(
             mode = DynamicIslandMode.TIMER,
             title = "Timer",
             subtitle = formatSeconds(seconds),
             icon = "timer",
             accentColor = 0xFFFF9500
         )
+
+        // Split into detached bubble if music or call is active!
+        if (_isMusicPlaying.value || _isInCall.value) {
+            _secondaryDynamicIsland.value = timerData
+        } else {
+            _dynamicIsland.value = timerData
+        }
+
         countdownTimerJob = viewModelScope.launch {
             while (_timerRemainingSeconds.value > 0 && _isTimerRunning.value) {
                 delay(1000)
                 _timerRemainingSeconds.value -= 1
+                val timeStr = formatSeconds(_timerRemainingSeconds.value)
                 if (_dynamicIsland.value.mode == DynamicIslandMode.TIMER) {
-                    _dynamicIsland.value = _dynamicIsland.value.copy(
-                        subtitle = formatSeconds(_timerRemainingSeconds.value)
-                    )
+                    _dynamicIsland.value = _dynamicIsland.value.copy(subtitle = timeStr)
+                }
+                if (_secondaryDynamicIsland.value?.mode == DynamicIslandMode.TIMER) {
+                    _secondaryDynamicIsland.value = _secondaryDynamicIsland.value?.copy(subtitle = timeStr)
                 }
             }
             _isTimerRunning.value = false
+            _secondaryDynamicIsland.value = null
             showDynamicIslandNotification("Timer", "Waktu selesai!", "bell", 0xFFFF9500)
         }
     }
@@ -1424,6 +2088,162 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
         if (_dynamicIsland.value.mode == DynamicIslandMode.TIMER) {
             _dynamicIsland.value = DynamicIslandData(mode = DynamicIslandMode.COMPACT)
         }
+        _secondaryDynamicIsland.value = null
+    }
+
+    fun toggleTimerPauseResume() {
+        if (_isTimerRunning.value) {
+            _isTimerRunning.value = false
+            countdownTimerJob?.cancel()
+        } else if (_timerRemainingSeconds.value > 0) {
+            startTimer(_timerRemainingSeconds.value)
+        } else {
+            startTimer(300)
+        }
+    }
+
+    @android.annotation.SuppressLint("MissingPermission")
+    fun refreshSystemTelemetry(context: Context) {
+        try {
+            val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+            _isLowPowerMode.value = pm?.isPowerSaveMode ?: false
+
+            val hasBtConnect = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                androidx.core.content.ContextCompat.checkSelfPermission(
+                    context,
+                    android.Manifest.permission.BLUETOOTH_CONNECT
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            } else true
+
+            val btAdapter = BluetoothAdapter.getDefaultAdapter()
+            if (hasBtConnect && btAdapter != null && btAdapter.isEnabled) {
+                try {
+                    val a2dp = btAdapter.getProfileConnectionState(BluetoothProfile.A2DP) == BluetoothProfile.STATE_CONNECTED
+                    val headset = btAdapter.getProfileConnectionState(BluetoothProfile.HEADSET) == BluetoothProfile.STATE_CONNECTED
+                    _isBluetoothDeviceConnected.value = a2dp || headset
+                } catch (_: SecurityException) {
+                    _isBluetoothDeviceConnected.value = false
+                }
+            }
+
+            val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+            _isLocationActive.value = lm?.isProviderEnabled(LocationManager.GPS_PROVIDER) == true
+
+            val nextAlarm = Settings.System.getString(context.contentResolver, Settings.System.NEXT_ALARM_FORMATTED)
+            _isAlarmSet.value = !nextAlarm.isNullOrBlank()
+        } catch (_: Exception) {}
+    }
+
+    fun setSecondaryDynamicIsland(data: DynamicIslandData?) {
+        _secondaryDynamicIsland.value = data
+    }
+
+    fun dismissSecondaryDynamicIsland() {
+        _secondaryDynamicIsland.value = null
+    }
+
+    fun onSecondaryIslandClicked() {
+        val sec = _secondaryDynamicIsland.value ?: return
+        _dynamicIsland.value = sec
+        _secondaryDynamicIsland.value = null
+    }
+
+    fun showDualIslandDemo() {
+        _isMusicPlaying.value = true
+        OverlayBridge.isMusicPlaying.value = true
+        _dynamicIsland.value = DynamicIslandData(mode = DynamicIslandMode.COMPACT)
+        _secondaryDynamicIsland.value = DynamicIslandData(
+            mode = DynamicIslandMode.TIMER,
+            title = "Timer",
+            subtitle = "04:59",
+            icon = "timer",
+            accentColor = 0xFFFF9500
+        )
+    }
+
+    fun toggleBluetoothConnected() {
+        _isBluetoothDeviceConnected.value = !_isBluetoothDeviceConnected.value
+    }
+
+    fun toggleVpnActive() {
+        _isVpnActive.value = !_isVpnActive.value
+    }
+
+    fun toggleLocationActive() {
+        _isLocationActive.value = !_isLocationActive.value
+    }
+
+    fun toggleAlarmSet() {
+        _isAlarmSet.value = !_isAlarmSet.value
+    }
+
+    fun toggleLowPowerMode() {
+        _isLowPowerMode.value = !_isLowPowerMode.value
+    }
+
+    fun toggleBatteryPercentage(context: Context? = null) {
+        val newVal = !_showBatteryPercentage.value
+        _showBatteryPercentage.value = newVal
+        val ctx = context ?: getApplication<Application>()
+        IOSPersistenceManager.getPrefs(ctx).edit().putBoolean("show_battery_pct", newVal).apply()
+    }
+
+    fun toggleShowNetworkSpeed(context: Context? = null) {
+        val newVal = !_showNetworkSpeed.value
+        _showNetworkSpeed.value = newVal
+        val ctx = context ?: getApplication<Application>()
+        IOSPersistenceManager.getPrefs(ctx).edit().putBoolean("show_network_speed", newVal).apply()
+    }
+
+    private fun startNetworkTrafficMonitor() {
+        viewModelScope.launch(Dispatchers.IO) {
+            var lastRxBytes = android.net.TrafficStats.getTotalRxBytes()
+            var lastTxBytes = android.net.TrafficStats.getTotalTxBytes()
+            var lastTime = System.currentTimeMillis()
+            while (true) {
+                delay(1000)
+                try {
+                    val currentRx = android.net.TrafficStats.getTotalRxBytes()
+                    val currentTx = android.net.TrafficStats.getTotalTxBytes()
+                    val currentTime = System.currentTimeMillis()
+
+                    val deltaRx = (currentRx - lastRxBytes).coerceAtLeast(0)
+                    val deltaTx = (currentTx - lastTxBytes).coerceAtLeast(0)
+                    val deltaTimeSec = ((currentTime - lastTime) / 1000.0).coerceAtLeast(0.5)
+
+                    lastRxBytes = currentRx
+                    lastTxBytes = currentTx
+                    lastTime = currentTime
+
+                    val totalBytesPerSec = ((deltaRx + deltaTx) / deltaTimeSec).toLong()
+                    val speedText = when {
+                        totalBytesPerSec >= 1024 * 1024 -> String.format(java.util.Locale.US, "%.1f MB/s", totalBytesPerSec / (1024.0 * 1024.0))
+                        totalBytesPerSec >= 1024 -> "${totalBytesPerSec / 1024} KB/s"
+                        totalBytesPerSec > 0 -> "$totalBytesPerSec B/s"
+                        else -> "0 KB/s"
+                    }
+                    _networkSpeed.value = speedText
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    fun setNotchCalibration(offsetY: Float, scale: Float, context: Context? = null) {
+        _notchOffsetY.value = offsetY
+        _notchScale.value = scale
+        val ctx = context ?: getApplication<Application>()
+        IOSPersistenceManager.getPrefs(ctx).edit()
+            .putFloat("notch_offset_y", offsetY)
+            .putFloat("notch_scale", scale)
+            .apply()
+    }
+
+    fun lockDevice() {
+        closeApp()
+        _isDeviceLocked.value = true
+        _isControlCenterOpen.value = false
+        _isNotificationCenterOpen.value = false
+        _isAppSwitcherOpen.value = false
     }
 
     private fun formatSeconds(totalSecs: Int): String {
@@ -1547,23 +2367,73 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
     @SuppressLint("MissingPermission")
     fun scanWifiNetworks(context: Context) {
         viewModelScope.launch(Dispatchers.IO) {
+            _isWifiScanning.value = true
             try {
+                RootExecutor.execute("pm grant ${context.packageName} android.permission.ACCESS_FINE_LOCATION 2>/dev/null || true")
+                RootExecutor.execute("pm grant ${context.packageName} android.permission.ACCESS_WIFI_STATE 2>/dev/null || true")
+
                 val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+                val cm = context.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+
                 if (wifiManager != null) {
-                    val info = wifiManager.connectionInfo
-                    if (info != null && !info.ssid.isNullOrBlank() && info.ssid != "<unknown ssid>") {
-                        _currentWifiSsid.value = info.ssid.removeSurrounding("\"")
-                    }
-                    val scanResults = wifiManager.scanResults
-                    if (!scanResults.isNullOrEmpty()) {
-                        val scanned = scanResults
-                            .filter { it.SSID.isNotBlank() }
-                            .map { Pair(it.SSID, it.capabilities.contains("WPA") || it.capabilities.contains("WEP")) }
-                            .distinctBy { it.first }
-                        if (scanned.isNotEmpty()) {
+                    val isEnabled = wifiManager.isWifiEnabled
+                    _wifiEnabled.value = isEnabled
+                    if (isEnabled) {
+                        try {
+                            wifiManager.startScan()
+                        } catch (ignored: Exception) {}
+
+                        val info = wifiManager.connectionInfo
+                        if (info != null && !info.ssid.isNullOrBlank() && info.ssid != "<unknown ssid>") {
+                            _currentWifiSsid.value = info.ssid.removeSurrounding("\"")
+                            _isWifiConnected.value = true
+                        } else {
+                            val activeNet = cm?.activeNetwork
+                            val caps = cm?.getNetworkCapabilities(activeNet)
+                            if (caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true) {
+                                _isWifiConnected.value = true
+                                val raw = info?.ssid?.removeSurrounding("\"")
+                                _currentWifiSsid.value = if (!raw.isNullOrBlank() && raw != "<unknown ssid>") raw else "Wi-Fi"
+                            } else {
+                                _isWifiConnected.value = false
+                                _currentWifiSsid.value = ""
+                            }
+                        }
+
+                        val scanResults = wifiManager.scanResults
+                        if (!scanResults.isNullOrEmpty()) {
+                            val scanned = scanResults
+                                .filter { it.SSID.isNotBlank() }
+                                .map { Pair(it.SSID, it.capabilities.contains("WPA") || it.capabilities.contains("WEP")) }
+                                .distinctBy { it.first }
                             _availableWifiList.value = scanned
                         }
+                    } else {
+                        _isWifiConnected.value = false
+                        _currentWifiSsid.value = ""
+                        _availableWifiList.value = emptyList()
                     }
+                }
+            } catch (ignored: Exception) {}
+            delay(1000)
+            _isWifiScanning.value = false
+        }
+    }
+
+    fun refreshCellularInfo(context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val tm = context.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
+                if (tm != null) {
+                    val opName = tm.networkOperatorName
+                    val simName = tm.simOperatorName
+                    val carrier = when {
+                        !opName.isNullOrBlank() -> opName
+                        !simName.isNullOrBlank() -> simName
+                        tm.simState == TelephonyManager.SIM_STATE_ABSENT -> "No SIM"
+                        else -> "Cellular"
+                    }
+                    _cellularCarrierName.value = carrier
                 }
             } catch (ignored: Exception) {}
         }
@@ -1677,7 +2547,18 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
                     addAction(BluetoothAdapter.ACTION_DISCOVERY_STARTED)
                     addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
                 }
-                ctx.registerReceiver(receiver, filter)
+                try {
+                    androidx.core.content.ContextCompat.registerReceiver(
+                        ctx,
+                        receiver,
+                        filter,
+                        androidx.core.content.ContextCompat.RECEIVER_EXPORTED
+                    )
+                } catch (_: Exception) {
+                    try {
+                        ctx.registerReceiver(receiver, filter)
+                    } catch (_: Exception) {}
+                }
 
                 try {
                     if (adapter.isDiscovering) {
@@ -1849,19 +2730,81 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // Wallpaper Management
-    fun setWallpaper(resId: Int, name: String, uri: String? = null, context: Context? = null) {
+    fun setWallpaper(
+        resId: Int,
+        name: String,
+        uri: String? = null,
+        context: Context? = null,
+        customForegroundUri: String? = null,
+        customClockLayoutMode: ClockLayoutMode? = null,
+        customClockFontStyle: ClockFontStyle? = null,
+        customClockColorHex: Long? = null,
+        customClockFontSize: Float? = null,
+        customClockTopPadding: Float? = null,
+        customClockHorizOffset: Float? = null,
+        customClockFontWeight: Int? = null,
+        customClockOpacity: Float? = null,
+        customShowWeatherWidget: Boolean? = null,
+        customShowBatteryWidget: Boolean? = null,
+        customShowCalendarWidget: Boolean? = null
+    ) {
         _currentWallpaperRes.value = resId
         _currentWallpaperName.value = name
         _currentWallpaperUri.value = uri
         val ctx = context ?: getApplication<Application>()
         IOSPersistenceManager.saveWallpaper(ctx, resId, name, uri)
+
+        // Sync LockScreenConfig so custom wallpapers never collide with preset depth themes
+        val currentCfg = _lockScreenConfig.value
+        val updatedDepthTheme = if (resId != 0) {
+            when (resId) {
+                com.example.R.drawable.wp_twilight_clouds -> "twilight_clouds"
+                com.example.R.drawable.wp_monochrome_wave -> "monochrome_wave"
+                com.example.R.drawable.wp_golden_dunes -> "golden_dunes"
+                com.example.R.drawable.wp_coastal_flora -> "coastal_flora"
+                com.example.R.drawable.wp_daisy_meadow -> "daisy_meadow"
+                com.example.R.drawable.wp_sunset_reeds -> "sunset_reeds"
+                com.example.R.drawable.wp_crystal_glass -> "crystal_glass"
+                com.example.R.drawable.wp_glass_sanctuary -> "glass_sanctuary"
+                com.example.R.drawable.wp_glass_still_life -> "glass_still_life"
+                com.example.R.drawable.wallpaper_alpine -> "mountain"
+                else -> "none"
+            }
+        } else "custom"
+
+        val updatedCfg = currentCfg.copy(
+            depthTheme = updatedDepthTheme,
+            customForegroundUri = customForegroundUri,
+            depthEffectEnabled = if (resId == 0 && customForegroundUri == null) false else (customForegroundUri != null || currentCfg.depthEffectEnabled),
+            clockLayoutMode = customClockLayoutMode ?: currentCfg.clockLayoutMode,
+            fontStyle = customClockFontStyle ?: currentCfg.fontStyle,
+            clockColorHex = customClockColorHex ?: currentCfg.clockColorHex,
+            useAutoThemeColor = if (customClockColorHex != null) false else currentCfg.useAutoThemeColor,
+            clockFontSize = customClockFontSize ?: currentCfg.clockFontSize,
+            clockFontWeight = customClockFontWeight ?: currentCfg.clockFontWeight,
+            clockOpacity = customClockOpacity ?: currentCfg.clockOpacity,
+            clockTopPaddingPercent = customClockTopPadding ?: currentCfg.clockTopPaddingPercent,
+            clockHorizontalOffset = customClockHorizOffset ?: currentCfg.clockHorizontalOffset,
+            showWeatherWidget = customShowWeatherWidget ?: currentCfg.showWeatherWidget,
+            showBatteryWidget = customShowBatteryWidget ?: currentCfg.showBatteryWidget,
+            showCalendarWidget = customShowCalendarWidget ?: currentCfg.showCalendarWidget
+        )
+        _lockScreenConfig.value = updatedCfg
+        IOSPersistenceManager.saveFullLockScreenConfig(ctx, updatedCfg)
+
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val wm = android.app.WallpaperManager.getInstance(ctx)
                 if (uri != null) {
-                    val stream = ctx.contentResolver.openInputStream(android.net.Uri.parse(uri))
-                    val bitmap = android.graphics.BitmapFactory.decodeStream(stream)
-                    stream?.close()
+                    val parsed = android.net.Uri.parse(uri)
+                    val bitmap = if (parsed.scheme == "file" && parsed.path != null) {
+                        android.graphics.BitmapFactory.decodeFile(parsed.path)
+                    } else {
+                        val stream = ctx.contentResolver.openInputStream(parsed)
+                        val bmp = android.graphics.BitmapFactory.decodeStream(stream)
+                        stream?.close()
+                        bmp
+                    }
                     if (bitmap != null) {
                         wm.setBitmap(bitmap)
                     }
@@ -1875,17 +2818,61 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
         showDynamicIslandNotification("Wallpaper", "Wallpaper applied: $name", "photo", 0xFF32ADE6)
     }
 
-    // Device Lock & Passcode
-    fun lockDevice() {
-        _isDeviceLocked.value = true
-        _currentApp.value = null
-        _isControlCenterOpen.value = false
-        _isNotificationCenterOpen.value = false
+    fun setLockScreenWallpaper(
+        resId: Int,
+        name: String,
+        uri: String? = null,
+        context: Context? = null,
+        customForegroundUri: String? = null,
+        customClockLayoutMode: ClockLayoutMode? = null,
+        customClockFontStyle: ClockFontStyle? = null,
+        customClockColorHex: Long? = null,
+        customClockFontSize: Float? = null,
+        customClockTopPadding: Float? = null,
+        customClockHorizOffset: Float? = null,
+        customClockFontWeight: Int? = null,
+        customClockOpacity: Float? = null,
+        customShowWeatherWidget: Boolean? = null,
+        customShowBatteryWidget: Boolean? = null,
+        customShowCalendarWidget: Boolean? = null
+    ) {
+        setWallpaper(
+            resId, name, uri, context, customForegroundUri,
+            customClockLayoutMode, customClockFontStyle, customClockColorHex,
+            customClockFontSize, customClockTopPadding, customClockHorizOffset,
+            customClockFontWeight, customClockOpacity,
+            customShowWeatherWidget, customShowBatteryWidget, customShowCalendarWidget
+        )
     }
 
+    fun setHomeScreenWallpaper(
+        resId: Int,
+        name: String,
+        uri: String? = null,
+        context: Context? = null
+    ) {
+        _homeScreenWallpaperRes.value = resId
+        _homeScreenWallpaperName.value = name
+        _homeScreenWallpaperUri.value = uri
+        val ctx = context ?: getApplication<Application>()
+        IOSPersistenceManager.saveHomeScreenWallpaper(ctx, resId, name, uri)
+        showDynamicIslandNotification("Layar Utama", "Wallpaper Layar Utama diperbarui", "photo", 0xFF32ADE6)
+    }
+
+    // Device Lock & Passcode
     fun unlockDevice() {
         _isDeviceLocked.value = false
-        showDynamicIslandNotification("Face ID", "iPhone Unlocked", "faceid", 0xFF34C759)
+        dynamicIslandJob?.cancel()
+        _dynamicIsland.value = DynamicIslandData(
+            mode = DynamicIslandMode.UNLOCK,
+            icon = "lock_open"
+        )
+        dynamicIslandJob = viewModelScope.launch {
+            delay(1200)
+            if (_dynamicIsland.value.mode == DynamicIslandMode.UNLOCK) {
+                _dynamicIsland.value = DynamicIslandData(mode = DynamicIslandMode.COMPACT)
+            }
+        }
     }
 
     fun setPasscode(code: String) {
@@ -1898,6 +2885,10 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toggleFaceId(enabled: Boolean) {
+        _isFaceIdEnabled.value = enabled
+    }
+
+    fun setFaceIdEnabled(enabled: Boolean) {
         _isFaceIdEnabled.value = enabled
     }
 
@@ -1954,12 +2945,13 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                val currentBuiltIns = _musicList.value.filter { it.uriString == null }
                 if (deviceSongs.isNotEmpty()) {
-                    _musicList.value = deviceSongs + currentBuiltIns
+                    _musicList.value = deviceSongs
                     if (_currentSong.value == null) {
                         _currentSong.value = deviceSongs.first()
                     }
+                } else {
+                    _musicList.value = emptyList()
                 }
             } catch (ignored: Exception) {}
         }
@@ -2283,6 +3275,30 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun toggleVolumeInterceptionRoot(context: Context? = null) {
+        viewModelScope.launch {
+            val ctx = context ?: getApplication<Application>()
+            val currentlyActive = RootExecutor.isVolumeInterceptionEnabled(ctx)
+            val result = if (currentlyActive) {
+                RootExecutor.disableVolumeInterception(ctx)
+            } else {
+                RootExecutor.enableVolumeInterception(ctx)
+            }
+            val isEnabled = RootExecutor.isVolumeInterceptionEnabled(ctx)
+            _isVolumeInterceptionActive.value = isEnabled
+            IOSPersistenceManager.saveRootBoolean(ctx, "volume_interception", isEnabled)
+            val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+            val log = RootCommandLog(time, if (isEnabled) "enable_volume_interception" else "disable_volume_interception", result.second, result.first)
+            _rootLogs.value = _rootLogs.value + log
+            showDynamicIslandNotification(
+                "Dynamic Island Volume",
+                if (isEnabled) "Dialog Android Diblokir (Dynamic Island Saja)" else "Volume Bawaan Android Dipulihkan",
+                "volume",
+                if (isEnabled) 0xFF007AFF else 0xFF8E8E93
+            )
+        }
+    }
+
     fun toggleSystemUIDisabledRoot(context: Context? = null) {
         viewModelScope.launch {
             val newState = !_isSystemUIDisabled.value
@@ -2423,24 +3439,6 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
     // App Library State (Installed Device Apps categorized)
     private val _installedApps = MutableStateFlow<List<InstalledAppItem>>(emptyList())
     val installedApps: StateFlow<List<InstalledAppItem>> = _installedApps.asStateFlow()
-
-    private fun Drawable.toBitmapSafe(targetSize: Int = 144): Bitmap? {
-        return try {
-            if (this is BitmapDrawable && this.bitmap != null) {
-                this.bitmap
-            } else {
-                val width = if (intrinsicWidth > 0) intrinsicWidth else targetSize
-                val height = if (intrinsicHeight > 0) intrinsicHeight else targetSize
-                val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                val canvas = Canvas(bitmap)
-                setBounds(0, 0, canvas.width, canvas.height)
-                draw(canvas)
-                bitmap
-            }
-        } catch (e: Throwable) {
-            null
-        }
-    }
 
     private fun categorizeApp(pkg: String, name: String, isGameFlag: Boolean = false): String {
         val lower = "$pkg $name".lowercase(Locale.ROOT)
@@ -2586,7 +3584,9 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
                 InstalledAppItem(context.packageName, "Health", "Health", isBuiltIn = true, builtInId = AppId.HEALTH, iconColor = 0xFFFF2D55),
                 InstalledAppItem(context.packageName, "Wallet", "Utilities", isBuiltIn = true, builtInId = AppId.WALLET, iconColor = 0xFF000000),
                 InstalledAppItem(context.packageName, "FaceTime", "Social", isBuiltIn = true, builtInId = AppId.FACETIME, iconColor = 0xFF34C759),
-                InstalledAppItem(context.packageName, "iRoot SE", "Utilities", isBuiltIn = true, builtInId = AppId.ROOT_TOOLS, iconColor = 0xFF5856D6)
+                InstalledAppItem(context.packageName, "AI Depth Studio", "Utilities", isBuiltIn = true, builtInId = AppId.DEPTH_STUDIO, iconColor = 0xFF5856D6),
+                InstalledAppItem(context.packageName, "iRoot SE", "Utilities", isBuiltIn = true, builtInId = AppId.ROOT_TOOLS, iconColor = 0xFF5856D6),
+                InstalledAppItem(context.packageName, "Dynamic Island", "Utilities", isBuiltIn = true, builtInId = AppId.DYNAMIC_ISLAND, iconColor = 0xFF000000)
             )
 
             for (builtIn in builtInList) {
@@ -2595,7 +3595,821 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
 
-            _installedApps.value = finalList
+            // Apply persistent user folder customizations
+            val overrides = IOSPersistenceManager.loadAppCategoryOverrides(context)
+            val mappedList = if (overrides.isNotEmpty()) {
+                finalList.map { item ->
+                    val k = item.builtInId?.name ?: item.packageName
+                    val overriddenCat = overrides[k]
+                    if (overriddenCat != null && item.category != "Recent") {
+                        item.copy(category = overriddenCat, iconColor = getCategoryColor(overriddenCat))
+                    } else item
+                }
+            } else finalList
+
+            _installedApps.value = mappedList
+
+            // Update bitmaps in _homeScreenApps if any installed apps were saved
+            val currentHome = _homeScreenApps.value
+            if (currentHome.any { it.isInstalledApp && it.customBitmap == null }) {
+                val updatedHome = currentHome.map { item ->
+                    if (item.isInstalledApp && item.customBitmap == null) {
+                        val matched = mappedList.firstOrNull { it.packageName == item.packageName }
+                        if (matched?.iconBitmap != null) {
+                            item.copy(customBitmap = matched.iconBitmap)
+                        } else item
+                    } else item
+                }
+                _homeScreenApps.value = updatedHome
+            }
+        }
+    }
+
+    fun moveAppToCategory(app: InstalledAppItem, targetCategory: String, context: Context) {
+        val appKey = app.builtInId?.name ?: app.packageName
+        IOSPersistenceManager.saveAppCategoryOverride(context, appKey, targetCategory)
+        IOSPersistenceManager.saveCustomFolder(context, targetCategory)
+
+        _installedApps.value = _installedApps.value.map { item ->
+            val k = item.builtInId?.name ?: item.packageName
+            if (k == appKey && item.category != "Recent") {
+                item.copy(category = targetCategory, iconColor = getCategoryColor(targetCategory))
+            } else item
+        }
+        showDynamicIslandNotification("App Library", "${app.appName} dipindahkan ke folder $targetCategory", "folder", 0xFF0A84FF)
+    }
+
+    fun createCustomFolder(folderName: String, context: Context) {
+        IOSPersistenceManager.saveCustomFolder(context, folderName)
+        showDynamicIslandNotification("App Library", "Folder $folderName dibuat", "folder", 0xFF34C759)
+    }
+
+    fun deleteCustomFolder(folderName: String, context: Context) {
+        IOSPersistenceManager.removeCustomFolder(context, folderName)
+        _installedApps.value = _installedApps.value.map { item ->
+            if (item.category == folderName) {
+                val appKey = item.builtInId?.name ?: item.packageName
+                IOSPersistenceManager.saveAppCategoryOverride(context, appKey, "Other")
+                item.copy(category = "Other", iconColor = getCategoryColor("Other"))
+            } else item
+        }
+        showDynamicIslandNotification("App Library", "Folder $folderName dihapus", "delete", 0xFFFF453A)
+    }
+
+    fun resetAppCategories(context: Context) {
+        IOSPersistenceManager.getPrefs(context).edit().remove("app_category_overrides").apply()
+        loadDeviceInstalledApps(context)
+        showDynamicIslandNotification("App Library", "Kategori aplikasi diatur ulang", "restore", 0xFFFF9500)
+    }
+
+    fun initHomeScreenApps(context: Context) {
+        val prefs = IOSPersistenceManager.getPrefs(context)
+        val defaultApps = listOf(
+            // Row 1 (adjacent to 2x2 Calendar Widget): 4 apps
+            AppItem(AppId.NOTES, "Notes", Color.White, null),
+            AppItem(AppId.REMINDERS, "Reminder", Color.White, null),
+            AppItem(AppId.CAMERA, "Camera", Color(0xFF636366), Icons.Rounded.CameraAlt),
+            AppItem(AppId.PHOTOS, "Photos", Color.White, null),
+
+            // Row 2: 4 apps matching default user layout
+            AppItem(AppId.SETTINGS, "Settings", Color(0xFF8E8E93), Icons.Rounded.Settings, badgeCount = 1),
+            AppItem(AppId.CUSTOM_APP, "Youtube", Color(0xFFFF0000), Icons.Rounded.PlayArrow, packageName = "com.google.android.youtube", isInstalledApp = true),
+            AppItem(AppId.CUSTOM_APP, "Whatsapp", Color(0xFF25D366), Icons.Rounded.ChatBubble, packageName = "com.whatsapp", isInstalledApp = true),
+            AppItem(AppId.DEPTH_STUDIO, "Depth Studio", Color(0xFF5856D6), Icons.Rounded.Layers),
+
+            // Page 2 apps
+            AppItem(AppId.MAIL, "Mail", Color(0xFF007AFF), Icons.Rounded.Email, badgeCount = 2),
+            AppItem(AppId.TV, "TV", Color.Black, Icons.Rounded.Tv),
+            AppItem(AppId.PODCASTS, "Podcast", Color(0xFF8E44AD), Icons.Rounded.Podcasts),
+            AppItem(AppId.APP_STORE, "App Store", Color(0xFF1D6EEB), Icons.Rounded.ShoppingBag),
+            AppItem(AppId.MAPS, "Maps", Color(0xFF2ECC71), Icons.Rounded.Map),
+            AppItem(AppId.FACETIME, "FaceTime", IOSGreen, Icons.Rounded.Videocam),
+            AppItem(AppId.HEALTH, "Health", Color.White, Icons.Rounded.Favorite, badgeCount = 0),
+            AppItem(AppId.WALLET, "Wallet", Color.Black, Icons.Rounded.AccountBalanceWallet),
+            AppItem(AppId.CLOCK, "Clock", Color.Black, null),
+            AppItem(AppId.ROOT_TOOLS, "iRoot SE", Color(0xFF5856D6), Icons.Rounded.Security)
+        )
+
+        val isPresetV5 = prefs.getBoolean("layout_preset_v5_apps_applied", false)
+        if (!isPresetV5) {
+            _homeScreenApps.value = defaultApps
+            saveCurrentHomeScreenApps(context, defaultApps)
+            prefs.edit().putBoolean("layout_preset_v5_apps_applied", true).apply()
+            return
+        }
+
+        val saved = IOSPersistenceManager.loadHomeScreenApps(context)
+        if (saved == null) {
+            _homeScreenApps.value = defaultApps
+            saveCurrentHomeScreenApps(context, defaultApps)
+            return
+        }
+
+        val builtInMap = defaultApps.associateBy { it.id.name }
+        val pm = context.packageManager
+        val list = mutableListOf<AppItem>()
+
+        for (itemKey in saved) {
+            if (itemKey.startsWith("B:")) {
+                val idName = itemKey.removePrefix("B:")
+                val item = builtInMap[idName] ?: try {
+                    val appId = AppId.valueOf(idName)
+                    AppItem(id = appId, name = idName.lowercase().replaceFirstChar { it.uppercase() }, iconBgColor = Color(0xFF007AFF))
+                } catch (e: Exception) { null }
+                if (item != null) list.add(item)
+            } else if (itemKey.startsWith("P:")) {
+                val pkg = itemKey.removePrefix("P:")
+                try {
+                    val appInfo = pm.getApplicationInfo(pkg, 0)
+                    val label = pm.getApplicationLabel(appInfo).toString()
+                    val iconDrawable = pm.getApplicationIcon(appInfo)
+                    val bmp = iconDrawable.toBitmapSafe(144)
+                    list.add(
+                        AppItem(
+                            id = AppId.CUSTOM_APP,
+                            name = label,
+                            iconBgColor = Color.Transparent,
+                            packageName = pkg,
+                            isInstalledApp = true,
+                            customBitmap = bmp
+                        )
+                    )
+                } catch (e: Exception) {
+                    // App might be uninstalled, ignore
+                }
+            }
+        }
+        _homeScreenApps.value = if (list.isNotEmpty()) list else defaultApps
+    }
+
+    private fun saveCurrentHomeScreenApps(context: Context, apps: List<AppItem> = _homeScreenApps.value) {
+        val keys = apps.map { app ->
+            if (app.isInstalledApp && !app.packageName.isNullOrBlank()) {
+                "P:${app.packageName}"
+            } else {
+                "B:${app.id.name}"
+            }
+        }
+        IOSPersistenceManager.saveHomeScreenApps(context, keys)
+    }
+
+    fun reorderHomeScreenApps(fromIndex: Int, toIndex: Int, context: Context) {
+        val current = _homeScreenApps.value.toMutableList()
+        if (fromIndex in current.indices && toIndex in current.indices && fromIndex != toIndex) {
+            val item = current.removeAt(fromIndex)
+            current.add(toIndex, item)
+            _homeScreenApps.value = current
+            saveCurrentHomeScreenApps(context, current)
+        }
+    }
+
+    fun moveHomeScreenApp(app: AppItem, direction: Int, context: Context) {
+        val current = _homeScreenApps.value.toMutableList()
+        val index = current.indexOfFirst {
+            if (app.isInstalledApp) it.packageName == app.packageName else it.id == app.id
+        }
+        if (index >= 0) {
+            val targetIndex = (index + direction).coerceIn(0, current.size - 1)
+            if (targetIndex != index) {
+                val item = current.removeAt(index)
+                current.add(targetIndex, item)
+                _homeScreenApps.value = current
+                saveCurrentHomeScreenApps(context, current)
+                com.example.util.IOSFeedbackHelper.vibrateLight(context)
+            }
+        }
+    }
+
+    fun initWidgetTypes(context: Context) {
+        val prefs = IOSPersistenceManager.getPrefs(context)
+        val isPresetV5 = prefs.getBoolean("layout_preset_v5_widgets_applied", false)
+        if (!isPresetV5) {
+            prefs.edit()
+                .putString("widget1_type", "WEATHER")
+                .putString("widget1_size", "MEDIUM")
+                .putInt("widget1_row", 0)
+                .putString("widget1_align", "LEFT")
+                .putBoolean("widget1_enabled", true)
+
+                .putString("widget2_type", "CALENDAR")
+                .putString("widget2_size", "SMALL")
+                .putInt("widget2_row", 1)
+                .putString("widget2_align", "LEFT")
+                .putBoolean("widget2_enabled", true)
+
+                .putString("widget3_type", "WHATSAPP")
+                .putString("widget3_size", "MEDIUM")
+                .putInt("widget3_row", 2)
+                .putString("widget3_align", "LEFT")
+                .putBoolean("widget3_enabled", false)
+
+                .putBoolean("widget4_enabled", false)
+                .putBoolean("widget5_enabled", false)
+                .putBoolean("widget6_enabled", false)
+                .putBoolean("layout_preset_v5_widgets_applied", true)
+                .apply()
+        }
+
+        _widget1Type.value = prefs.getString("widget1_type", "WEATHER") ?: "WEATHER"
+        _widget1Size.value = prefs.getString("widget1_size", "MEDIUM") ?: "MEDIUM"
+        _widget1Row.value = prefs.getInt("widget1_row", 0)
+        _widget1Align.value = prefs.getString("widget1_align", "LEFT") ?: "LEFT"
+        _widget1Enabled.value = prefs.getBoolean("widget1_enabled", true)
+
+        _widget2Type.value = prefs.getString("widget2_type", "CALENDAR") ?: "CALENDAR"
+        _widget2Size.value = prefs.getString("widget2_size", "SMALL") ?: "SMALL"
+        _widget2Row.value = prefs.getInt("widget2_row", 1)
+        _widget2Align.value = prefs.getString("widget2_align", "LEFT") ?: "LEFT"
+        _widget2Enabled.value = prefs.getBoolean("widget2_enabled", true)
+
+        _widget3Type.value = prefs.getString("widget3_type", "WHATSAPP") ?: "WHATSAPP"
+        _widget3Size.value = prefs.getString("widget3_size", "MEDIUM") ?: "MEDIUM"
+        _widget3Row.value = prefs.getInt("widget3_row", 2)
+        _widget3Align.value = prefs.getString("widget3_align", "LEFT") ?: "LEFT"
+        _widget3Enabled.value = prefs.getBoolean("widget3_enabled", false)
+
+        _widget4Type.value = prefs.getString("widget4_type", "PHOTOS") ?: "PHOTOS"
+        _widget4Size.value = prefs.getString("widget4_size", "SMALL") ?: "SMALL"
+        _widget4Row.value = prefs.getInt("widget4_row", 3)
+        _widget4Align.value = prefs.getString("widget4_align", "LEFT") ?: "LEFT"
+        _widget4Enabled.value = prefs.getBoolean("widget4_enabled", false)
+
+        _widget5Type.value = prefs.getString("widget5_type", "BATTERY") ?: "BATTERY"
+        _widget5Size.value = prefs.getString("widget5_size", "SMALL") ?: "SMALL"
+        _widget5Row.value = prefs.getInt("widget5_row", 4)
+        _widget5Align.value = prefs.getString("widget5_align", "RIGHT") ?: "RIGHT"
+        _widget5Enabled.value = prefs.getBoolean("widget5_enabled", false)
+
+        _widget6Type.value = prefs.getString("widget6_type", "CLOCK") ?: "CLOCK"
+        _widget6Size.value = prefs.getString("widget6_size", "SMALL") ?: "SMALL"
+        _widget6Row.value = prefs.getInt("widget6_row", 5)
+        _widget6Align.value = prefs.getString("widget6_align", "LEFT") ?: "LEFT"
+        _widget6Enabled.value = prefs.getBoolean("widget6_enabled", false)
+
+        _leftWidgetType.value = _widget1Type.value
+        _rightWidgetType.value = _widget2Type.value
+        _widgetRowPosition.value = prefs.getInt("home_widget_row_pos", 0)
+    }
+
+    fun setWidgetType(widgetIndex: Int, newType: String, context: Context) {
+        val prefs = IOSPersistenceManager.getPrefs(context)
+        when (widgetIndex) {
+            1 -> {
+                _widget1Type.value = newType
+                _widget1Enabled.value = true
+                _leftWidgetType.value = newType
+                prefs.edit().putString("widget1_type", newType).putBoolean("widget1_enabled", true).putString("home_left_widget", newType).apply()
+            }
+            2 -> {
+                _widget2Type.value = newType
+                _widget2Enabled.value = true
+                _rightWidgetType.value = newType
+                prefs.edit().putString("widget2_type", newType).putBoolean("widget2_enabled", true).putString("home_right_widget", newType).apply()
+            }
+            3 -> {
+                _widget3Type.value = newType
+                _widget3Enabled.value = true
+                prefs.edit().putString("widget3_type", newType).putBoolean("widget3_enabled", true).apply()
+            }
+            4 -> {
+                _widget4Type.value = newType
+                _widget4Enabled.value = true
+                prefs.edit().putString("widget4_type", newType).putBoolean("widget4_enabled", true).apply()
+            }
+            5 -> {
+                _widget5Type.value = newType
+                _widget5Enabled.value = true
+                prefs.edit().putString("widget5_type", newType).putBoolean("widget5_enabled", true).apply()
+            }
+            6 -> {
+                _widget6Type.value = newType
+                _widget6Enabled.value = true
+                prefs.edit().putString("widget6_type", newType).putBoolean("widget6_enabled", true).apply()
+            }
+        }
+        val label = getWidgetDisplayName(newType)
+        showDynamicIslandNotification("Widget", "Diubah ke $label", "app.dashed", 0xFF007AFF)
+        com.example.util.IOSFeedbackHelper.vibrateLight(context)
+    }
+
+    fun setWidgetSize(widgetIndex: Int, newSize: String, context: Context) {
+        val prefs = IOSPersistenceManager.getPrefs(context)
+        when (widgetIndex) {
+            1 -> {
+                _widget1Size.value = newSize
+                _widget1Enabled.value = true
+                prefs.edit().putString("widget1_size", newSize).putBoolean("widget1_enabled", true).apply()
+            }
+            2 -> {
+                _widget2Size.value = newSize
+                _widget2Enabled.value = true
+                prefs.edit().putString("widget2_size", newSize).putBoolean("widget2_enabled", true).apply()
+            }
+            3 -> {
+                _widget3Size.value = newSize
+                _widget3Enabled.value = true
+                prefs.edit().putString("widget3_size", newSize).putBoolean("widget3_enabled", true).apply()
+            }
+            4 -> {
+                _widget4Size.value = newSize
+                _widget4Enabled.value = true
+                prefs.edit().putString("widget4_size", newSize).putBoolean("widget4_enabled", true).apply()
+            }
+            5 -> {
+                _widget5Size.value = newSize
+                _widget5Enabled.value = true
+                prefs.edit().putString("widget5_size", newSize).putBoolean("widget5_enabled", true).apply()
+            }
+            6 -> {
+                _widget6Size.value = newSize
+                _widget6Enabled.value = true
+                prefs.edit().putString("widget6_size", newSize).putBoolean("widget6_enabled", true).apply()
+            }
+        }
+        val sizeLabel = when (newSize) {
+            "MEDIUM" -> "Sedang (4x2)"
+            "COMPACT" -> "Ringkas (2x1)"
+            "LARGE" -> "Besar (4x4)"
+            else -> "Kecil (2x2)"
+        }
+        showDynamicIslandNotification("Ukuran Frame", sizeLabel, "arrow.up.left.and.arrow.down.right", 0xFF34C759)
+        com.example.util.IOSFeedbackHelper.vibrateLight(context)
+    }
+
+    fun toggleWidgetSize(widgetIndex: Int, context: Context) {
+        val currentSize = when (widgetIndex) {
+            1 -> _widget1Size.value
+            2 -> _widget2Size.value
+            3 -> _widget3Size.value
+            4 -> _widget4Size.value
+            5 -> _widget5Size.value
+            else -> _widget6Size.value
+        }
+        val nextSize = when (currentSize) {
+            "SMALL" -> "MEDIUM"
+            "MEDIUM" -> "COMPACT"
+            "COMPACT" -> "LARGE"
+            "LARGE" -> "SMALL"
+            else -> "SMALL"
+        }
+        setWidgetSize(widgetIndex, nextSize, context)
+    }
+
+    fun toggleWidgetAlignment(widgetIndex: Int, context: Context) {
+        val prefs = IOSPersistenceManager.getPrefs(context)
+        val newAlign = when (widgetIndex) {
+            1 -> if (_widget1Align.value == "LEFT") "RIGHT" else "LEFT"
+            2 -> if (_widget2Align.value == "LEFT") "RIGHT" else "LEFT"
+            3 -> if (_widget3Align.value == "LEFT") "RIGHT" else "LEFT"
+            4 -> if (_widget4Align.value == "LEFT") "RIGHT" else "LEFT"
+            5 -> if (_widget5Align.value == "LEFT") "RIGHT" else "LEFT"
+            else -> if (_widget6Align.value == "LEFT") "RIGHT" else "LEFT"
+        }
+        when (widgetIndex) {
+            1 -> { _widget1Align.value = newAlign; prefs.edit().putString("widget1_align", newAlign).apply() }
+            2 -> { _widget2Align.value = newAlign; prefs.edit().putString("widget2_align", newAlign).apply() }
+            3 -> { _widget3Align.value = newAlign; prefs.edit().putString("widget3_align", newAlign).apply() }
+            4 -> { _widget4Align.value = newAlign; prefs.edit().putString("widget4_align", newAlign).apply() }
+            5 -> { _widget5Align.value = newAlign; prefs.edit().putString("widget5_align", newAlign).apply() }
+            6 -> { _widget6Align.value = newAlign; prefs.edit().putString("widget6_align", newAlign).apply() }
+        }
+        val posLabel = if (newAlign == "LEFT") "Kiri" else "Kanan"
+        showDynamicIslandNotification("Posisi Kolom", "Pindah ke $posLabel", "arrow.left.and.right", 0xFF007AFF)
+        com.example.util.IOSFeedbackHelper.vibrateLight(context)
+    }
+
+    fun setWidgetRow(widgetIndex: Int, newRow: Int, context: Context) {
+        val clamped = newRow.coerceIn(0, 5)
+        val prefs = IOSPersistenceManager.getPrefs(context)
+        when (widgetIndex) {
+            1 -> { _widget1Row.value = clamped; prefs.edit().putInt("widget1_row", clamped).apply() }
+            2 -> { _widget2Row.value = clamped; prefs.edit().putInt("widget2_row", clamped).apply() }
+            3 -> { _widget3Row.value = clamped; prefs.edit().putInt("widget3_row", clamped).apply() }
+            4 -> { _widget4Row.value = clamped; prefs.edit().putInt("widget4_row", clamped).apply() }
+            5 -> { _widget5Row.value = clamped; prefs.edit().putInt("widget5_row", clamped).apply() }
+            6 -> { _widget6Row.value = clamped; prefs.edit().putInt("widget6_row", clamped).apply() }
+        }
+        showDynamicIslandNotification("Posisi Widget", "Pindah ke Baris $clamped", "rectangle.split.2x1", 0xFF007AFF)
+        com.example.util.IOSFeedbackHelper.vibrateLight(context)
+    }
+
+    fun moveSingleWidgetUp(widgetIndex: Int, context: Context) {
+        val current = when (widgetIndex) {
+            1 -> _widget1Row.value
+            2 -> _widget2Row.value
+            3 -> _widget3Row.value
+            4 -> _widget4Row.value
+            5 -> _widget5Row.value
+            else -> _widget6Row.value
+        }
+        setWidgetRow(widgetIndex, current - 1, context)
+    }
+
+    fun moveSingleWidgetDown(widgetIndex: Int, context: Context) {
+        val current = when (widgetIndex) {
+            1 -> _widget1Row.value
+            2 -> _widget2Row.value
+            3 -> _widget3Row.value
+            4 -> _widget4Row.value
+            5 -> _widget5Row.value
+            else -> _widget6Row.value
+        }
+        setWidgetRow(widgetIndex, current + 1, context)
+    }
+
+    fun removeWidget(widgetIndex: Int, context: Context) {
+        val prefs = IOSPersistenceManager.getPrefs(context)
+        when (widgetIndex) {
+            1 -> { _widget1Enabled.value = false; prefs.edit().putBoolean("widget1_enabled", false).apply() }
+            2 -> { _widget2Enabled.value = false; prefs.edit().putBoolean("widget2_enabled", false).apply() }
+            3 -> { _widget3Enabled.value = false; prefs.edit().putBoolean("widget3_enabled", false).apply() }
+            4 -> { _widget4Enabled.value = false; prefs.edit().putBoolean("widget4_enabled", false).apply() }
+            5 -> { _widget5Enabled.value = false; prefs.edit().putBoolean("widget5_enabled", false).apply() }
+            6 -> { _widget6Enabled.value = false; prefs.edit().putBoolean("widget6_enabled", false).apply() }
+        }
+        showDynamicIslandNotification("Widget", "Widget Dihapus dari Layar Utama", "trash", 0xFFFF3B30)
+        com.example.util.IOSFeedbackHelper.vibrateMedium(context)
+    }
+
+    fun addWidget(type: String, size: String = "SMALL", preferredRow: Int = -1, context: Context): Int {
+        val prefs = IOSPersistenceManager.getPrefs(context)
+        val targetSlot = when {
+            !_widget1Enabled.value -> 1
+            !_widget2Enabled.value -> 2
+            !_widget3Enabled.value -> 3
+            !_widget4Enabled.value -> 4
+            !_widget5Enabled.value -> 5
+            !_widget6Enabled.value -> 6
+            else -> 4
+        }
+        val targetRow = if (preferredRow in 0..5) preferredRow else when (targetSlot) {
+            1, 2 -> 0
+            3 -> 1
+            4 -> 2
+            5 -> 3
+            else -> 4
+        }
+
+        when (targetSlot) {
+            1 -> {
+                _widget1Type.value = type
+                _widget1Size.value = size
+                _widget1Row.value = targetRow
+                _widget1Enabled.value = true
+                prefs.edit().putString("widget1_type", type).putString("widget1_size", size).putInt("widget1_row", targetRow).putBoolean("widget1_enabled", true).apply()
+            }
+            2 -> {
+                _widget2Type.value = type
+                _widget2Size.value = size
+                _widget2Row.value = targetRow
+                _widget2Enabled.value = true
+                prefs.edit().putString("widget2_type", type).putString("widget2_size", size).putInt("widget2_row", targetRow).putBoolean("widget2_enabled", true).apply()
+            }
+            3 -> {
+                _widget3Type.value = type
+                _widget3Size.value = size
+                _widget3Row.value = targetRow
+                _widget3Enabled.value = true
+                prefs.edit().putString("widget3_type", type).putString("widget3_size", size).putInt("widget3_row", targetRow).putBoolean("widget3_enabled", true).apply()
+            }
+            4 -> {
+                _widget4Type.value = type
+                _widget4Size.value = size
+                _widget4Row.value = targetRow
+                _widget4Enabled.value = true
+                prefs.edit().putString("widget4_type", type).putString("widget4_size", size).putInt("widget4_row", targetRow).putBoolean("widget4_enabled", true).apply()
+            }
+            5 -> {
+                _widget5Type.value = type
+                _widget5Size.value = size
+                _widget5Row.value = targetRow
+                _widget5Enabled.value = true
+                prefs.edit().putString("widget5_type", type).putString("widget5_size", size).putInt("widget5_row", targetRow).putBoolean("widget5_enabled", true).apply()
+            }
+            6 -> {
+                _widget6Type.value = type
+                _widget6Size.value = size
+                _widget6Row.value = targetRow
+                _widget6Enabled.value = true
+                prefs.edit().putString("widget6_type", type).putString("widget6_size", size).putInt("widget6_row", targetRow).putBoolean("widget6_enabled", true).apply()
+            }
+        }
+        val label = getWidgetDisplayName(type)
+        showDynamicIslandNotification("Widget", "$label Ditambahkan ke Layar Utama", "plus", 0xFF34C759)
+        com.example.util.IOSFeedbackHelper.vibrateLight(context)
+        return targetSlot
+    }
+
+    fun getWidgetDisplayName(type: String): String {
+        return when (type) {
+            "WHATSAPP" -> "WhatsApp (Pesan & Chat)"
+            "WEATHER" -> "Cuaca (Weather)"
+            "PHOTOS" -> "Foto (Photos)"
+            "CALENDAR" -> "Kalender (Calendar)"
+            "BATTERY" -> "Baterai (Battery)"
+            "CLOCK" -> "Jam Dunia (Clock)"
+            "MUSIC" -> "Musik (Music)"
+            "FITNESS" -> "Aktivitas (Fitness)"
+            "NOTES" -> "Catatan (Notes)"
+            else -> type
+        }
+    }
+
+    fun setWidgetRowPosition(pos: Int, context: Context) {
+        val clamped = pos.coerceIn(0, 2)
+        _widgetRowPosition.value = clamped
+        _widget1Row.value = clamped
+        _widget2Row.value = clamped
+        val prefs = IOSPersistenceManager.getPrefs(context)
+        prefs.edit().putInt("home_widget_row_pos", clamped).putInt("widget1_row", clamped).putInt("widget2_row", clamped).apply()
+        val posName = when (clamped) {
+            0 -> "Atas (Top)"
+            1 -> "Tengah (Middle)"
+            else -> "Bawah (Bottom)"
+        }
+        showDynamicIslandNotification("Widget", "Posisi: $posName", "rectangle.split.2x1", 0xFF007AFF)
+        com.example.util.IOSFeedbackHelper.vibrateLight(context)
+    }
+
+    fun moveWidgetUp(context: Context) {
+        setWidgetRowPosition(_widgetRowPosition.value - 1, context)
+    }
+
+    fun moveWidgetDown(context: Context) {
+        setWidgetRowPosition(_widgetRowPosition.value + 1, context)
+    }
+
+    fun swapWidgets(context: Context) {
+        val temp = _leftWidgetType.value
+        _leftWidgetType.value = _rightWidgetType.value
+        _rightWidgetType.value = temp
+        val prefs = IOSPersistenceManager.getPrefs(context)
+        prefs.edit()
+            .putString("home_left_widget", _leftWidgetType.value)
+            .putString("home_right_widget", _rightWidgetType.value)
+            .apply()
+        showDynamicIslandNotification("Widgets", "Posisi widget ditukar", "arrow.left.arrow.right", 0xFF007AFF)
+    }
+
+    fun cycleWidget(isLeft: Boolean, context: Context) {
+        val types = listOf("WEATHER", "PHOTOS", "CALENDAR", "BATTERY")
+        val current = if (isLeft) _leftWidgetType.value else _rightWidgetType.value
+        val currentIndex = types.indexOf(current).let { if (it >= 0) it else 0 }
+        val nextType = types[(currentIndex + 1) % types.size]
+        if (isLeft) {
+            _leftWidgetType.value = nextType
+        } else {
+            _rightWidgetType.value = nextType
+        }
+        val prefs = IOSPersistenceManager.getPrefs(context)
+        prefs.edit()
+            .putString(if (isLeft) "home_left_widget" else "home_right_widget", nextType)
+            .apply()
+        val name = when (nextType) {
+            "WEATHER" -> "Cuaca (Weather)"
+            "PHOTOS" -> "Galeri (Photos)"
+            "CALENDAR" -> "Kalender (Calendar)"
+            "BATTERY" -> "Baterai (Battery)"
+            else -> nextType
+        }
+        showDynamicIslandNotification("Widget", "Diubah ke $name", "app.dashed", 0xFF34C759)
+    }
+
+    fun removeAppFromHomeScreen(app: AppItem, context: Context) {
+        val current = _homeScreenApps.value.toMutableList()
+        current.removeAll {
+            if (app.isInstalledApp) it.packageName == app.packageName else it.id == app.id
+        }
+        _homeScreenApps.value = current
+        saveCurrentHomeScreenApps(context, current)
+        showDynamicIslandNotification("Home Screen", "${app.name} Dihapus dari Layar Utama", "trash", 0xFFFF3B30)
+    }
+
+    fun addInstalledAppToHomeScreen(installedApp: InstalledAppItem, context: Context) {
+        val current = _homeScreenApps.value.toMutableList()
+        if (installedApp.isBuiltIn && installedApp.builtInId != null) {
+            if (current.any { it.id == installedApp.builtInId }) {
+                showDynamicIslandNotification("Home Screen", "${installedApp.appName} sudah ada di Layar Utama", "info", 0xFFFF9500)
+                return
+            }
+            val defaultGrid = listOf(
+                AppItem(AppId.FACETIME, "FaceTime", IOSGreen, Icons.Rounded.Videocam),
+                AppItem(AppId.CALENDAR, "Calendar", Color.White, null),
+                AppItem(AppId.PHOTOS, "Photos", Color.White, null),
+                AppItem(AppId.CAMERA, "Camera", Color(0xFF636366), Icons.Rounded.CameraAlt),
+                AppItem(AppId.MAIL, "Mail", Color(0xFF007AFF), Icons.Rounded.Email, badgeCount = 2),
+                AppItem(AppId.NOTES, "Notes", Color.White, null),
+                AppItem(AppId.REMINDERS, "Reminders", Color.White, null),
+                AppItem(AppId.CLOCK, "Clock", Color.Black, null),
+                AppItem(AppId.TV, "TV", Color.Black, Icons.Rounded.Tv),
+                AppItem(AppId.PODCASTS, "Podcasts", Color(0xFF8E44AD), Icons.Rounded.Podcasts),
+                AppItem(AppId.APP_STORE, "App Store", Color(0xFF1D6EEB), Icons.Rounded.ShoppingBag),
+                AppItem(AppId.MAPS, "Maps", Color(0xFF2ECC71), Icons.Rounded.Map),
+                AppItem(AppId.HEALTH, "Health", Color.White, Icons.Rounded.Favorite, badgeCount = 0),
+                AppItem(AppId.WALLET, "Wallet", Color.Black, Icons.Rounded.AccountBalanceWallet),
+                AppItem(AppId.SETTINGS, "Settings", Color(0xFF8E8E93), Icons.Rounded.Settings, badgeCount = 1),
+                AppItem(AppId.ROOT_TOOLS, "iRoot SE", Color(0xFF5856D6), Icons.Rounded.Security)
+            )
+            val matched = defaultGrid.firstOrNull { it.id == installedApp.builtInId }
+                ?: AppItem(id = installedApp.builtInId, name = installedApp.appName, iconBgColor = Color(installedApp.iconColor))
+            current.add(matched)
+        } else {
+            if (current.any { it.packageName == installedApp.packageName }) {
+                showDynamicIslandNotification("Home Screen", "${installedApp.appName} sudah ada di Layar Utama", "info", 0xFFFF9500)
+                return
+            }
+            val bmp = installedApp.iconBitmap ?: try {
+                context.packageManager.getApplicationIcon(installedApp.packageName).toBitmapSafe(144)
+            } catch (e: Exception) { null }
+
+            val item = AppItem(
+                id = AppId.CUSTOM_APP,
+                name = installedApp.appName,
+                iconBgColor = Color.Transparent,
+                packageName = installedApp.packageName,
+                isInstalledApp = true,
+                customBitmap = bmp
+            )
+            current.add(item)
+        }
+        _homeScreenApps.value = current
+        saveCurrentHomeScreenApps(context, current)
+        showDynamicIslandNotification("Home Screen", "${installedApp.appName} Ditambahkan ke Layar Utama", "plus", 0xFF34C759)
+    }
+
+    fun addAppItemToHomeScreen(appItem: AppItem, context: Context) {
+        val current = _homeScreenApps.value.toMutableList()
+        if (appItem.isInstalledApp) {
+            if (current.none { it.packageName == appItem.packageName }) {
+                current.add(appItem)
+            }
+        } else {
+            if (current.none { it.id == appItem.id }) {
+                current.add(appItem)
+            }
+        }
+        _homeScreenApps.value = current
+        saveCurrentHomeScreenApps(context, current)
+        showDynamicIslandNotification("Home Screen", "${appItem.name} Ditambahkan ke Layar Utama", "plus", 0xFF34C759)
+    }
+
+    fun resetHomeScreenApps(context: Context) {
+        IOSPersistenceManager.saveHomeScreenApps(context, emptyList())
+        initHomeScreenApps(context)
+        showDynamicIslandNotification("Home Screen", "Tata Letak Ikon Direset", "refresh", 0xFF007AFF)
+    }
+
+    // =========================================================================
+    // DOCK APPS MANAGEMENT & CUSTOMIZATION
+    // =========================================================================
+
+    fun initDockApps(context: Context) {
+        val saved = IOSPersistenceManager.loadDockApps(context)
+        val defaultDock = listOf(
+            AppItem(AppId.PHONE, "Phone", IOSGreen, Icons.Rounded.Call, isDock = true),
+            AppItem(AppId.SAFARI, "Safari", Color.White, Icons.Rounded.Explore, isDock = true),
+            AppItem(AppId.MESSAGES, "Messages", IOSGreen, Icons.Rounded.ChatBubble, isDock = true),
+            AppItem(AppId.MUSIC, "Music", Color(0xFFFF2D55), Icons.Rounded.MusicNote, isDock = true)
+        )
+
+        if (saved == null || saved.isEmpty()) {
+            _dockApps.value = defaultDock
+            saveCurrentDockApps(context, defaultDock)
+            return
+        }
+
+        val pm = context.packageManager
+        val list = mutableListOf<AppItem>()
+
+        for (itemKey in saved) {
+            if (itemKey.startsWith("B:")) {
+                val idName = itemKey.removePrefix("B:")
+                val matched = defaultDock.firstOrNull { it.id.name == idName } ?: try {
+                    val appId = AppId.valueOf(idName)
+                    val iconVector = when (appId) {
+                        AppId.PHONE -> Icons.Rounded.Call
+                        AppId.SAFARI -> Icons.Rounded.Explore
+                        AppId.MESSAGES -> Icons.Rounded.ChatBubble
+                        AppId.MUSIC -> Icons.Rounded.MusicNote
+                        AppId.MAIL -> Icons.Rounded.Email
+                        AppId.CAMERA -> Icons.Rounded.CameraAlt
+                        AppId.SETTINGS -> Icons.Rounded.Settings
+                        AppId.PHOTOS -> Icons.Rounded.Photo
+                        else -> Icons.Rounded.Apps
+                    }
+                    val bg = when (appId) {
+                        AppId.PHONE, AppId.MESSAGES -> IOSGreen
+                        AppId.MUSIC -> Color(0xFFFF2D55)
+                        AppId.MAIL -> Color(0xFF007AFF)
+                        AppId.SETTINGS -> Color(0xFF8E8E93)
+                        else -> Color.White
+                    }
+                    AppItem(id = appId, name = idName.lowercase().replaceFirstChar { it.uppercase() }, iconBgColor = bg, iconVector = iconVector, isDock = true)
+                } catch (e: Exception) { null }
+                if (matched != null) list.add(matched.copy(isDock = true))
+            } else if (itemKey.startsWith("P:")) {
+                val pkg = itemKey.removePrefix("P:")
+                try {
+                    val appInfo = pm.getApplicationInfo(pkg, 0)
+                    val label = pm.getApplicationLabel(appInfo).toString()
+                    val iconDrawable = pm.getApplicationIcon(appInfo)
+                    val bmp = iconDrawable.toBitmapSafe(144)
+                    list.add(
+                        AppItem(
+                            id = AppId.CUSTOM_APP,
+                            name = label,
+                            iconBgColor = Color.Transparent,
+                            packageName = pkg,
+                            isInstalledApp = true,
+                            customBitmap = bmp,
+                            isDock = true
+                        )
+                    )
+                } catch (e: Exception) {
+                    // Ignored
+                }
+            }
+        }
+        _dockApps.value = if (list.isNotEmpty()) list else defaultDock
+    }
+
+    fun saveCurrentDockApps(context: Context, apps: List<AppItem> = _dockApps.value) {
+        val keys = apps.map { app ->
+            if (app.isInstalledApp && !app.packageName.isNullOrBlank()) {
+                "P:${app.packageName}"
+            } else {
+                "B:${app.id.name}"
+            }
+        }
+        IOSPersistenceManager.saveDockApps(context, keys)
+    }
+
+    fun setDockAppAt(index: Int, newApp: AppItem, context: Context) {
+        val current = _dockApps.value.toMutableList()
+        val dockItem = newApp.copy(isDock = true)
+        if (index in 0 until current.size) {
+            current[index] = dockItem
+        } else if (current.size < 4) {
+            current.add(dockItem)
+        }
+        _dockApps.value = current
+        saveCurrentDockApps(context, current)
+        showDynamicIslandNotification("Dock", "${newApp.name} dipasang di Dock", "dock", 0xFF007AFF)
+    }
+
+    fun replaceDockApp(oldApp: AppItem, newApp: AppItem, context: Context) {
+        val current = _dockApps.value.toMutableList()
+        val idx = current.indexOfFirst {
+            if (oldApp.isInstalledApp) it.packageName == oldApp.packageName else it.id == oldApp.id
+        }
+        if (idx >= 0) {
+            current[idx] = newApp.copy(isDock = true)
+            _dockApps.value = current
+            saveCurrentDockApps(context, current)
+            showDynamicIslandNotification("Dock", "${newApp.name} menggantikan ${oldApp.name}", "dock", 0xFF007AFF)
+        }
+    }
+
+    fun removeDockApp(app: AppItem, context: Context) {
+        val current = _dockApps.value.toMutableList()
+        current.removeAll {
+            if (app.isInstalledApp) it.packageName == app.packageName else it.id == app.id
+        }
+        _dockApps.value = current
+        saveCurrentDockApps(context, current)
+        showDynamicIslandNotification("Dock", "${app.name} dihapus dari Dock", "trash", 0xFFFF3B30)
+    }
+
+    fun addDockApp(app: AppItem, context: Context) {
+        val current = _dockApps.value.toMutableList()
+        if (current.size >= 4) {
+            showDynamicIslandNotification("Dock", "Dock sudah penuh (maks 4 aplikasi)", "alert", 0xFFFF9500)
+            return
+        }
+        current.add(app.copy(isDock = true))
+        _dockApps.value = current
+        saveCurrentDockApps(context, current)
+        showDynamicIslandNotification("Dock", "${app.name} ditambahkan ke Dock", "plus", 0xFF34C759)
+    }
+
+    fun resetDockApps(context: Context) {
+        IOSPersistenceManager.saveDockApps(context, emptyList())
+        initDockApps(context)
+        showDynamicIslandNotification("Dock", "Aplikasi Dock direset ke awal", "refresh", 0xFF007AFF)
+    }
+
+    fun launchInstalledApp(context: Context, packageName: String) {
+        if (Settings.canDrawOverlays(context)) {
+            com.example.service.IOSOverlayService.start(context)
+        }
+        try {
+            val launchIntent = context.packageManager.getLaunchIntentForPackage(packageName)
+            if (launchIntent != null) {
+                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(launchIntent)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
@@ -2606,15 +4420,7 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
         if (app.isBuiltIn && app.builtInId != null) {
             openApp(app.builtInId)
         } else {
-            try {
-                val launchIntent = context.packageManager.getLaunchIntentForPackage(app.packageName)
-                if (launchIntent != null) {
-                    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    context.startActivity(launchIntent)
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
+            launchInstalledApp(context, app.packageName)
         }
     }
 
@@ -3015,13 +4821,21 @@ class IOSViewModel(application: Application) : AndroidViewModel(application) {
     fun onIncomingCallReceived(incomingNumber: String) {
         _callContactName.value = incomingNumber
         _callPhoneNumber.value = incomingNumber
-        _dynamicIsland.value = DynamicIslandData(
+        _isInCall.value = true
+        val callData = DynamicIslandData(
             mode = DynamicIslandMode.CALL,
-            title = "Panggilan Masuk",
-            subtitle = incomingNumber,
-            icon = "call",
-            accentColor = 0xFF34C759
+            title = incomingNumber,
+            subtitle = "Panggilan Seluler...",
+            icon = "phone",
+            accentColor = 0xFF34C759,
+            isIncomingCall = true,
+            voipAppName = "Telepon"
         )
+        _dynamicIsland.value = callData
+        OverlayBridge.isInCall.value = true
+        OverlayBridge.callName.value = incomingNumber
+        OverlayBridge.callNumber.value = incomingNumber
+        OverlayBridge.dynamicIslandData.value = callData
     }
 
     @SuppressLint("MissingPermission")

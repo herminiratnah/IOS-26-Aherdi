@@ -1,6 +1,8 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -21,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.AppId
+import com.example.ui.components.LiquidGlassBorderBrush
 import com.example.viewmodel.IOSViewModel
 
 @Composable
@@ -40,10 +43,11 @@ fun TodayViewScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(Color.White.copy(alpha = 0.25f))
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color.White.copy(alpha = 0.28f))
+                .border(BorderStroke(1.dp, LiquidGlassBorderBrush), shape = RoundedCornerShape(14.dp))
                 .clickable { viewModel.openApp(AppId.SAFARI) }
-                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .padding(horizontal = 12.dp, vertical = 9.dp)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -52,12 +56,12 @@ fun TodayViewScreen(
                 Icon(
                     imageVector = Icons.Rounded.Search,
                     contentDescription = "Search",
-                    tint = Color.White.copy(alpha = 0.8f),
+                    tint = Color.White.copy(alpha = 0.85f),
                     modifier = Modifier.size(18.dp)
                 )
                 Text(
                     text = "Search",
-                    color = Color.White.copy(alpha = 0.8f),
+                    color = Color.White.copy(alpha = 0.85f),
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Normal
                 )
@@ -78,7 +82,12 @@ fun TodayViewScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(24.dp))
-                        .background(Color.White.copy(alpha = 0.3f))
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color.White.copy(alpha = 0.35f), Color.White.copy(alpha = 0.20f))
+                            )
+                        )
+                        .border(BorderStroke(1.2.dp, LiquidGlassBorderBrush), shape = RoundedCornerShape(24.dp))
                         .padding(16.dp)
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -132,7 +141,12 @@ fun TodayViewScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(24.dp))
-                        .background(Color.White.copy(alpha = 0.3f))
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color.White.copy(alpha = 0.35f), Color.White.copy(alpha = 0.20f))
+                            )
+                        )
+                        .border(BorderStroke(1.2.dp, LiquidGlassBorderBrush), shape = RoundedCornerShape(24.dp))
                         .clickable { viewModel.openApp(AppId.CALENDAR) }
                         .padding(16.dp)
                 ) {
@@ -151,7 +165,7 @@ fun TodayViewScreen(
                                         .size(8.dp)
                                         .clip(CircleShape)
                                         .background(Color(0xFFFF3B30))
-                                )
+                                    )
                                 Text(
                                     text = "CALENDAR",
                                     color = Color(0xFFFF3B30),
@@ -195,7 +209,12 @@ fun TodayViewScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(24.dp))
-                        .background(Color.White.copy(alpha = 0.3f))
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color.White.copy(alpha = 0.35f), Color.White.copy(alpha = 0.20f))
+                            )
+                        )
+                        .border(BorderStroke(1.2.dp, LiquidGlassBorderBrush), shape = RoundedCornerShape(24.dp))
                         .padding(16.dp)
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
